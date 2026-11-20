@@ -9,7 +9,7 @@ import (
 
 func listStands(ctx context.Context, q querier, eventID int64) ([]model.Stand, error) {
 	rows, err := q.QueryContext(ctx,
-		`SELECT id, event_id, name, description, position, color FROM stands WHERE event_id = ? ORDER BY position, id`, eventID)
+		`SELECT id, event_id, name, description, position, color, fill_row FROM stands WHERE event_id = ? ORDER BY position, id`, eventID)
 	if err != nil {
 		return nil, err
 	}
@@ -17,7 +17,7 @@ func listStands(ctx context.Context, q querier, eventID int64) ([]model.Stand, e
 	var out []model.Stand
 	for rows.Next() {
 		var st model.Stand
-		if err := rows.Scan(&st.ID, &st.EventID, &st.Name, &st.Description, &st.Position, &st.Color); err != nil {
+		if err := rows.Scan(&st.ID, &st.EventID, &st.Name, &st.Description, &st.Position, &st.Color, &st.FillRow); err != nil {
 			return nil, err
 		}
 		out = append(out, st)
@@ -41,9 +41,9 @@ func (s *Store) CreateStand(ctx context.Context, st *model.Stand) error {
 			return ErrTooManyStands
 		}
 		res, err := tx.ExecContext(ctx,
-			`INSERT INTO stands (event_id, name, description, color, position)
-			 VALUES (?, ?, ?, ?, (SELECT COALESCE(MAX(position), 0) + 1 FROM stands WHERE event_id = ?))`,
-			st.EventID, st.Name, st.Description, st.Color, st.EventID)
+			`INSERT INTO stands (event_id, name, description, color, fill_row, position)
+			 VALUES (?, ?, ?, ?, ?, (SELECT COALESCE(MAX(position), 0) + 1 FROM stands WHERE event_id = ?))`,
+			st.EventID, st.Name, st.Description, st.Color, st.FillRow, st.EventID)
 		if err != nil {
 			return err
 		}
@@ -52,11 +52,11 @@ func (s *Store) CreateStand(ctx context.Context, st *model.Stand) error {
 	})
 }
 
-// UpdateStand saves the name, description and colour of a stand.
+// UpdateStand saves the name, description, colour and row fill of a stand.
 func (s *Store) UpdateStand(ctx context.Context, st *model.Stand) error {
 	return affectedOne(s.db.ExecContext(ctx,
-		`UPDATE stands SET name = ?, description = ?, color = ? WHERE id = ? AND event_id = ?`,
-		st.Name, st.Description, st.Color, st.ID, st.EventID))
+		`UPDATE stands SET name = ?, description = ?, color = ?, fill_row = ? WHERE id = ? AND event_id = ?`,
+		st.Name, st.Description, st.Color, st.FillRow, st.ID, st.EventID))
 }
 
 // DeleteStand deletes a stand with its slots and sign-ups.

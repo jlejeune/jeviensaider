@@ -8,12 +8,12 @@ import (
 	"jeviensaider/internal/model"
 )
 
-const momentCols = `id, event_id, title, color, starts_at, ends_at`
+const momentCols = `id, event_id, title, color, fill, starts_at, ends_at`
 
 func scanMoment(row interface{ Scan(...any) error }) (model.Moment, error) {
 	var m model.Moment
 	var start, end string
-	err := row.Scan(&m.ID, &m.EventID, &m.Title, &m.Color, &start, &end)
+	err := row.Scan(&m.ID, &m.EventID, &m.Title, &m.Color, &m.Fill, &start, &end)
 	m.StartsAt, m.EndsAt = parseTime(start), parseTime(end)
 	return m, err
 }
@@ -72,19 +72,19 @@ func (s *Store) CreateMoment(ctx context.Context, m *model.Moment) error {
 // insertMoment adds a moment and returns its ID.
 func insertMoment(ctx context.Context, q querier, m model.Moment) (int64, error) {
 	res, err := q.ExecContext(ctx,
-		`INSERT INTO moments (event_id, title, color, starts_at, ends_at) VALUES (?, ?, ?, ?, ?)`,
-		m.EventID, m.Title, m.Color, fmtTime(m.StartsAt), fmtTime(m.EndsAt))
+		`INSERT INTO moments (event_id, title, color, fill, starts_at, ends_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		m.EventID, m.Title, m.Color, m.Fill, fmtTime(m.StartsAt), fmtTime(m.EndsAt))
 	if err != nil {
 		return 0, momentError(err)
 	}
 	return res.LastInsertId()
 }
 
-// UpdateMoment saves the title, the color and the times of a moment of m.EventID.
+// UpdateMoment saves the title, the color, the fill and the times of a moment of m.EventID.
 func (s *Store) UpdateMoment(ctx context.Context, m model.Moment) error {
 	res, err := s.db.ExecContext(ctx,
-		`UPDATE moments SET title = ?, color = ?, starts_at = ?, ends_at = ? WHERE id = ? AND event_id = ?`,
-		m.Title, m.Color, fmtTime(m.StartsAt), fmtTime(m.EndsAt), m.ID, m.EventID)
+		`UPDATE moments SET title = ?, color = ?, fill = ?, starts_at = ?, ends_at = ? WHERE id = ? AND event_id = ?`,
+		m.Title, m.Color, m.Fill, fmtTime(m.StartsAt), fmtTime(m.EndsAt), m.ID, m.EventID)
 	return affectedOne(res, momentError(err))
 }
 

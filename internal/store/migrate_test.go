@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"io/fs"
 	"path/filepath"
 	"testing"
 
@@ -87,9 +88,15 @@ func TestUpgradeToMoments(t *testing.T) {
 	if got, err := s.EventLastDay(ctx, 1); err != nil || !got.Equal(day("2027-01-15")) {
 		t.Errorf("EventLastDay = %v, %v; want 2027-01-15", got, err)
 	}
+	// migrate() numbers the files by their place in the sorted list, so the
+	// version is the number of files.
+	files, err := fs.Glob(migrationsFS, "migrations/*.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
 	var version int
 	s.db.QueryRow(`PRAGMA user_version`).Scan(&version)
-	if version != 5 {
-		t.Errorf("user_version = %d, want 5", version)
+	if version != len(files) {
+		t.Errorf("user_version = %d, want %d (the number of migrations)", version, len(files))
 	}
 }

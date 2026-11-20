@@ -76,6 +76,7 @@ templ adminView(d adminPage) {
 			<form method="post" action={ templ.SafeURL(d.AdminPath + "/stands") } class="card add-stand">
 				<label class="grow">Nouveau stand <input name="name" required maxlength="80" placeholder="Buvette, accueil, rangement…"/></label>
 				<label>Couleur <input type="color" name="color" value={ d.NextColor }/></label>
+				<label class="check"><input type="checkbox" name="fill_row" value="1"/> <span>Colorer toute la ligne</span></label>
 				<button class="btn primary" type="submit">
 					@iconPlus()
 					Ajouter
@@ -152,7 +153,7 @@ templ momentsSection(d adminPage) {
 					<details class="sub">
 						<summary>Modifier</summary>
 						<form method="post" action={ templ.SafeURL(d.AdminPath + "/moments/" + i64(m.ID)) } class="stack">
-							@momentFields(m.StartsAt.Format(model.DateLayout), m.StartsAt.Format("15:04"), m.EndsAt.Format("15:04"), m.Title, momentPickerColor(m.Color), m.Color == "")
+							@momentFields(m.StartsAt.Format(model.DateLayout), m.StartsAt.Format("15:04"), m.EndsAt.Format("15:04"), m.Title, momentPickerColor(m.Color), m.Color == "", m.Fill)
 							<div><button class="btn primary" type="submit">Enregistrer</button></div>
 						</form>
 						<form method="post" action={ templ.SafeURL(d.AdminPath + "/moments/" + i64(m.ID) + "/delete") } data-confirm={ "Supprimer le moment « " + m.Title + " » ?" }>
@@ -164,7 +165,7 @@ templ momentsSection(d adminPage) {
 		}
 		<form method="post" action={ templ.SafeURL(d.AdminPath + "/moments") } class="card stack">
 			<h3>Ajouter un moment</h3>
-			@momentFields(d.MomentDate, "", "", "", d.MomentColor, false)
+			@momentFields(d.MomentDate, "", "", "", d.MomentColor, false, false)
 			<div>
 				<button class="btn primary" type="submit">
 					@iconPlus()
@@ -175,12 +176,13 @@ templ momentsSection(d adminPage) {
 	</section>
 }
 
-// momentFields are the fields of a moment: day, start, end, title and color.
+// momentFields are the fields of a moment: day, start, end, title, color and
+// the choice to tint its column with that color.
 // The box "Sans couleur" is how the organizer goes back to no color. The
 // hidden field color_was holds the color that the picker showed, so that the
 // server can tell a color that the organizer picked from one that was already
 // there.
-templ momentFields(date, from, to, title, color string, noColor bool) {
+templ momentFields(date, from, to, title, color string, noColor, fill bool) {
 	<label>Jour <input type="date" name="date" value={ date } required/></label>
 	<div class="row2">
 		<label>De <input type="time" name="from" value={ from } required/></label>
@@ -192,6 +194,7 @@ templ momentFields(date, from, to, title, color string, noColor bool) {
 		<input type="hidden" name="color_was" value={ color }/>
 		<label class="check"><input type="checkbox" name="nocolor" value="1" checked?={ noColor }/> <span>Sans couleur</span></label>
 	</div>
+	<label class="check"><input type="checkbox" name="fill" value="1" checked?={ fill }/> <span>Colorer toute la colonne du planning, pas seulement la pastille</span></label>
 }
 
 templ adminStand(d adminPage, st *model.StandView, first, last bool) {
@@ -235,6 +238,7 @@ templ adminStand(d adminPage, st *model.StandView, first, last bool) {
 					<label class="grow">Nom <input name="name" value={ st.Name } required maxlength="80"/></label>
 					<label>Couleur <input type="color" name="color" value={ cssColor(st.Color) }/></label>
 				</div>
+				<label class="check"><input type="checkbox" name="fill_row" value="1" checked?={ st.FillRow }/> <span>Colorer toute la ligne du planning, pas seulement la pastille</span></label>
 				<label><span class="label-text">Description <span class="opt">ce que font les bénévoles</span></span> <textarea name="description" rows="2" maxlength="1000">{ st.Description }</textarea></label>
 				<div><button class="btn primary" type="submit">Enregistrer</button></div>
 			</form>
@@ -354,13 +358,18 @@ templ adminGrid(p *model.Planning) {
 			@planningHead(p)
 			<tbody>
 				for _, row := range p.Rows {
-					<tr>
-						<th scope="row" style={ standStyle(row.Stand.Color) }><span class="stand-name"><span class="dot"></span>{ row.Stand.Name }</span></th>
+					<tr class={ templ.KV("fill", row.Stand.FillRow) } style={ standStyle(row.Stand.Color) }>
+						<th scope="row"><span class="stand-name"><span class="dot"></span>{ row.Stand.Name }</span></th>
 						for i, cell := range row.Cells {
 							if p.Columns[i].MomentOnly {
 								@momentCell(p.Columns[i])
 							} else {
-								<td>
+								<td
+									class={ templ.KV("tinted", p.Columns[i].Fill) }
+									if p.Columns[i].Fill {
+										style={ momentStyle(p.Columns[i].Color) }
+									}
+								>
 									for _, s := range cell {
 										<div class={ "slot", slotKind(s) }>
 											<span class="slot-status">{ slotStatus(s) }</span>

@@ -277,25 +277,38 @@ a.slot:hover { color: var(--text); background: var(--slot-hover); }
 .grid .slot.need .slot-cta { background: none; color: var(--link); padding: 0; text-decoration: underline; }
 .dot { width: 12px; height: 12px; border-radius: 50%; background: var(--stand, var(--muted)); display: inline-block; flex-shrink: 0; }
 
-.grid-wrap { display: none; overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); }
+.grid-wrap { display: none; overflow-x: auto; padding: 0 6px; border: 1px solid var(--line); border-radius: var(--radius); }
 .grid-wrap.always { display: block; }
-.grid { border-collapse: separate; border-spacing: 6px; width: 100%; min-width: 640px; table-layout: fixed; }
-.grid th { font-size: .875rem; color: var(--muted); font-weight: 700; text-align: left; padding: 6px 4px; }
+.grid { border-collapse: separate; border-spacing: 0 6px; width: 100%; min-width: 640px; table-layout: fixed; }
+.grid th { font-size: .875rem; color: var(--muted); font-weight: 700; text-align: left; padding: 6px 7px 6px 4px; }
 .grid th small { font-weight: 400; }
 .grid thead th:first-child { width: 200px; }
 .grid tbody th { color: var(--text); vertical-align: top; padding-top: 10px; }
-.grid td { vertical-align: top; padding: 0; }
+.grid td { vertical-align: top; padding: 0 3px; }
+.grid td:last-child { padding-right: 0; }
 .grid td .slot + .slot { margin-top: 6px; }
-/* A part of the day with no slot: a tinted column from top to bottom. The
-   shadow fills the gaps between cells. The title and the legend say it in
-   words too. */
+/* A part of the day with no slot: a column from top to bottom. The shadow
+   fills the gap between two rows. The title and the legend say it in words
+   too. Its rules come after the row fill rules below, because a moment wins
+   over a stand in the cells that they share. */
 .col-title { display: block; color: var(--text); font-weight: 700; overflow-wrap: anywhere; }
-.grid th.moment, .grid td.moment-cell { --moment-bg: var(--moment); background: var(--moment-bg); box-shadow: 0 0 0 3px var(--moment-bg); }
-/* A moment with its own color: the tint is that color over the page surface,
-   so it stays readable in light and dark mode. */
-.grid th.moment.tinted, .grid td.moment-cell.tinted { --moment-bg: color-mix(in srgb, var(--moment-color) 30%, var(--surface)); }
 .dot.moment-dot { background: var(--moment-color); margin-right: 6px; }
 .grid .slot { min-height: 96px; font-size: .9rem; }
+/* A stand can colour its whole row, not only its dot. The tint is the stand
+   colour mixed into the surface, so the text keeps its contrast in light and
+   dark mode. The cells touch, so the colour has no gap inside the row. */
+.grid tr.fill th, .grid tr.fill td { background: color-mix(in srgb, var(--stand) 16%, var(--surface)); }
+.grid tr.fill th { padding: 10px 10px; border-radius: 12px 0 0 12px; }
+.grid tr.fill td { padding-top: 6px; padding-bottom: 6px; }
+.grid tr.fill td:last-child { padding-right: 3px; border-radius: 0 12px 12px 0; }
+.grid thead th.moment, .grid tbody td.moment-cell { --moment-bg: var(--moment); background: var(--moment-bg); box-shadow: 0 -3px 0 var(--moment-bg), 0 3px 0 var(--moment-bg); }
+/* A moment that tints its column: that color over the page surface, so it
+   stays readable in light and dark mode. This works for a column with slots
+   too, and for its group in the phone list. */
+.grid thead th.tinted, .grid tbody td.tinted { --moment-bg: color-mix(in srgb, var(--moment-color) 30%, var(--surface)); background: var(--moment-bg); box-shadow: 0 -3px 0 var(--moment-bg), 0 3px 0 var(--moment-bg); }
+.tgroup.tinted { background: color-mix(in srgb, var(--moment-color) 30%, var(--surface)); border-radius: 12px; padding: 10px 12px; }
+.timeline .slot.fill:not(.full):not(.mine) { background: color-mix(in srgb, var(--stand) 16%, var(--surface)); }
+.timeline a.slot.fill:not(.full):not(.mine):hover { background: color-mix(in srgb, var(--stand) 26%, var(--surface)); }
 .stand-name { display: flex; align-items: center; gap: 8px; font-size: 1rem; }
 .stand-desc { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-weight: 400; color: var(--muted); font-size: .85rem; margin-top: 4px; }
 .stand-more { display: none; font-size: .85rem; font-weight: 700; }

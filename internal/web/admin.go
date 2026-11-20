@@ -205,6 +205,7 @@ func readStand(r *http.Request, ev *model.Event) (*model.Stand, error) {
 		Name:        clean(r.FormValue("name"), maxStandName, false),
 		Description: clean(r.FormValue("description"), maxStandDescription, true),
 		Color:       r.FormValue("color"),
+		FillRow:     r.FormValue("fill_row") == "1",
 	}
 	if st.Name == "" {
 		return nil, userError("Le nom du stand est obligatoire.")
@@ -388,7 +389,7 @@ func (s *Server) adminUpdateMoment(w http.ResponseWriter, r *http.Request, ev *m
 	}
 	form, err := s.readMomentForm(r, date)
 	if err == nil {
-		m.Title, m.Color, m.StartsAt, m.EndsAt = form.Title, form.Color, form.StartsAt, form.EndsAt
+		m.Title, m.Color, m.Fill, m.StartsAt, m.EndsAt = form.Title, form.Color, form.Fill, form.StartsAt, form.EndsAt
 		if err = m.Check(); err == nil {
 			err = s.store.UpdateMoment(r.Context(), m)
 		}

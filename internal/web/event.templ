@@ -142,8 +142,8 @@ templ planningView(d eventPage) {
 				@planningHead(d.P)
 				<tbody>
 					for _, row := range d.P.Rows {
-						<tr>
-							<th scope="row" style={ standStyle(row.Stand.Color) }>
+						<tr class={ templ.KV("fill", row.Stand.FillRow) } style={ standStyle(row.Stand.Color) }>
+							<th scope="row">
 								<span class="stand-name"><span class="dot"></span>{ row.Stand.Name }</span>
 								if row.Stand.Description != "" {
 									<span class="stand-desc">{ row.Stand.Description }</span>
@@ -154,7 +154,12 @@ templ planningView(d eventPage) {
 								if d.P.Columns[i].MomentOnly {
 									@momentCell(d.P.Columns[i])
 								} else {
-									<td>
+									<td
+										class={ templ.KV("tinted", d.P.Columns[i].Fill) }
+										if d.P.Columns[i].Fill {
+											style={ momentStyle(d.P.Columns[i].Color) }
+										}
+									>
 										for _, s := range cell {
 											@slotCell(d, s, false)
 										}
@@ -177,7 +182,12 @@ templ momentList(d eventPage, class string) {
 	<div class={ class }>
 		for _, g := range d.P.Groups {
 			if groupShown(d, g) {
-				<section class="tgroup">
+				<section
+					class={ "tgroup", templ.KV("tinted", g.Fill) }
+					if g.Fill {
+						style={ momentStyle(g.Color) }
+					}
+				>
 					<h3>
 						if g.Title != "" {
 							@momentTitle("group-title", g.Title, g.Color)
@@ -200,12 +210,12 @@ templ momentList(d eventPage, class string) {
 templ slotCell(d eventPage, s *model.SlotView, showStand bool) {
 	if !d.TodoOnly || s.Missing > 0 {
 		if s.CanSignUp {
-			<a class={ "slot", slotKind(s), "st-" + s.Status } href={ signupURL(d.EventURL, s) } hx-get={ string(signupURL(d.EventURL, s)) } hx-target="#modal" style={ standStyle(s.Stand.Color) }>
+			<a class={ "slot", slotKind(s), "st-" + s.Status, templ.KV("fill", s.Stand.FillRow) } href={ signupURL(d.EventURL, s) } hx-get={ string(signupURL(d.EventURL, s)) } hx-target="#modal" style={ standStyle(s.Stand.Color) }>
 				@slotBody(d.P, s, showStand)
 				<span class="slot-cta">Je m'inscris</span>
 			</a>
 		} else {
-			<div class={ "slot", slotKind(s), "st-" + s.Status, templ.KV("mine", s.Mine), templ.KV("clash", s.Clash) } style={ standStyle(s.Stand.Color) }>
+			<div class={ "slot", slotKind(s), "st-" + s.Status, templ.KV("fill", s.Stand.FillRow), templ.KV("mine", s.Mine), templ.KV("clash", s.Clash) } style={ standStyle(s.Stand.Color) }>
 				@slotBody(d.P, s, showStand)
 			</div>
 		}
@@ -334,12 +344,13 @@ templ momentTitle(class, title, color string) {
 }
 
 // momentCell is the cell of a column that exists only for a moment: no stand
-// has a slot there. It is tinted with the color of the moment, if it has one.
-// The public grid and the organizer grid both use it.
+// has a slot there. It is tinted with the color of the moment if the organizer
+// chose to fill the column (see Column.Fill). The public grid and the
+// organizer grid both use it.
 templ momentCell(c model.Column) {
 	<td
-		class={ "moment-cell", templ.KV("tinted", c.Color != "") }
-		if c.Color != "" {
+		class={ "moment-cell", templ.KV("tinted", c.Fill) }
+		if c.Fill {
 			style={ momentStyle(c.Color) }
 		}
 	><span class="sr-only">Pas de créneau</span></td>
@@ -353,10 +364,8 @@ templ planningHead(p *model.Planning) {
 			for _, c := range p.Columns {
 				<th
 					scope="col"
-					if c.MomentOnly {
-						class={ "moment", templ.KV("tinted", c.Color != "") }
-					}
-					if c.MomentOnly && c.Color != "" {
+					class={ templ.KV("moment", c.MomentOnly), templ.KV("tinted", c.Fill) }
+					if c.Fill {
 						style={ momentStyle(c.Color) }
 					}
 				>

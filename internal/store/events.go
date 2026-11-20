@@ -139,8 +139,8 @@ func (s *Store) DuplicateEvent(ctx context.Context, src *model.Event, title, dat
 		newID := map[int64]int64{}
 		for _, st := range stands {
 			res, err := tx.ExecContext(ctx,
-				`INSERT INTO stands (event_id, name, description, position, color) VALUES (?, ?, ?, ?, ?)`,
-				dst.ID, st.Name, st.Description, st.Position, st.Color)
+				`INSERT INTO stands (event_id, name, description, position, color, fill_row) VALUES (?, ?, ?, ?, ?, ?)`,
+				dst.ID, st.Name, st.Description, st.Position, st.Color, st.FillRow)
 			if err != nil {
 				return err
 			}

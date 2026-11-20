@@ -72,6 +72,9 @@ type Stand struct {
 	Description string
 	Position    int
 	Color       string
+	// FillRow colours the whole row of the stand in the planning, not only
+	// the dot next to its name.
+	FillRow bool
 }
 
 type Slot struct {
@@ -122,7 +125,10 @@ type Moment struct {
 	EventID int64
 	Title   string
 	// Color is empty (no color) or "#rrggbb".
-	Color    string
+	Color string
+	// Fill tints the column of the moment with its color, not only the dot
+	// next to its title. It has no effect without a color.
+	Fill     bool
 	StartsAt time.Time
 	EndsAt   time.Time
 }

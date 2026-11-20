@@ -212,3 +212,32 @@ func TestMomentsDuplicateKeepsColors(t *testing.T) {
 		t.Errorf("copied colors: %+v %v", list, err)
 	}
 }
+
+// The fill of a moment is saved, and a duplicate of the event keeps it.
+func TestMomentFill(t *testing.T) {
+	s := openTest(t)
+	ev, _, _ := fixture(t, s, 3)
+	m := model.Moment{EventID: ev.ID, Title: "Spectacle", Color: "#e8c93a", Fill: true, StartsAt: at("2026-06-20 11:00"), EndsAt: at("2026-06-20 12:00")}
+	if err := s.CreateMoment(ctx, &m); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetMoment(ctx, ev.ID, m.ID)
+	if err != nil || !got.Fill {
+		t.Fatalf("fill not saved: %+v %v", got, err)
+	}
+	dup, err := s.DuplicateEvent(ctx, ev, "Copie", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	list, _ := s.ListMoments(ctx, dup.ID)
+	if len(list) != 1 || !list[0].Fill {
+		t.Errorf("duplicate did not keep the fill: %+v", list)
+	}
+	got.Fill = false
+	if err := s.UpdateMoment(ctx, got); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ = s.GetMoment(ctx, ev.ID, m.ID); got.Fill {
+		t.Error("fill still on after the update")
+	}
+}

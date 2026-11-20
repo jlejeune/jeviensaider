@@ -302,3 +302,35 @@ func TestMoveStand(t *testing.T) {
 		t.Error("moving the first stand up is a no-op, not an error")
 	}
 }
+
+// The row fill is a setting of each stand: it is saved, and a duplicate of
+// the event keeps it.
+func TestStandFillRow(t *testing.T) {
+	s := openTest(t)
+	ev, st, _ := fixture(t, s, 3)
+	if st.FillRow {
+		t.Fatal("a new stand must not fill its row")
+	}
+	other := &model.Stand{EventID: ev.ID, Name: "Tombola", Color: "#d9534f", FillRow: true}
+	if err := s.CreateStand(ctx, other); err != nil {
+		t.Fatal(err)
+	}
+	st.FillRow = true
+	if err := s.UpdateStand(ctx, st); err != nil {
+		t.Fatal(err)
+	}
+	stands, _ := s.ListStands(ctx, ev.ID)
+	if len(stands) != 2 || !stands[0].FillRow || !stands[1].FillRow {
+		t.Fatalf("fill_row not saved: %+v", stands)
+	}
+	st.FillRow = false
+	s.UpdateStand(ctx, st)
+	dup, err := s.DuplicateEvent(ctx, ev, "Copie", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stands, _ = s.ListStands(ctx, dup.ID)
+	if len(stands) != 2 || stands[0].FillRow || !stands[1].FillRow {
+		t.Errorf("duplicate did not keep the row fill: %+v", stands)
+	}
+}

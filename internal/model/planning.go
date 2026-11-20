@@ -41,6 +41,8 @@ type Column struct {
 	Title string
 	// Color is the color of that moment: empty, or "#rrggbb".
 	Color string
+	// Fill is set when the moment of that color tints the whole column.
+	Fill bool
 	// MomentOnly means that the column exists for a moment and has no slot.
 	MomentOnly bool
 }
@@ -149,12 +151,12 @@ func (p *Planning) addMoments(moments []Moment) {
 		k := span{m.StartsAt, m.EndsAt}
 		if i, ok := p.columnIndex[k]; ok {
 			if p.Columns[i].Title == "" {
-				p.Columns[i].Title, p.Columns[i].Color = m.Title, m.Color
+				p.Columns[i].Title, p.Columns[i].Color, p.Columns[i].Fill = m.Title, m.Color, m.Fill && m.Color != ""
 			}
 			continue
 		}
 		p.columnIndex[k] = len(p.Columns)
-		p.Columns = append(p.Columns, Column{StartsAt: m.StartsAt, EndsAt: m.EndsAt, Title: m.Title, Color: m.Color, MomentOnly: true})
+		p.Columns = append(p.Columns, Column{StartsAt: m.StartsAt, EndsAt: m.EndsAt, Title: m.Title, Color: m.Color, Fill: m.Fill && m.Color != "", MomentOnly: true})
 	}
 	sort.SliceStable(p.Columns, func(i, j int) bool {
 		a, b := p.Columns[i], p.Columns[j]

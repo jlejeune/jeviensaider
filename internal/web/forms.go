@@ -307,6 +307,8 @@ func (s *Server) readMomentForm(r *http.Request, date string) (model.Moment, err
 	if (picked || r.FormValue("nocolor") != "1") && validColor(c) {
 		m.Color = c
 	}
+	// The fill needs a color.
+	m.Fill = r.FormValue("fill") == "1" && m.Color != ""
 	return m, nil
 }
 
