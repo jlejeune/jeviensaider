@@ -177,7 +177,17 @@ func (s *Server) loadPlanning(ctx context.Context, ev *model.Event, myID int64, 
 	if err != nil {
 		return nil, nil, err
 	}
-	return model.BuildPlanning(stands, slots, moments, signups, myID, ev.IsOpen()), moments, nil
+	lists, err := s.store.ListPledgeLists(ctx, ev.ID)
+	if err != nil {
+		return nil, nil, err
+	}
+	pledges, err := s.store.ListPledges(ctx, ev.ID)
+	if err != nil {
+		return nil, nil, err
+	}
+	p := model.BuildPlanning(stands, slots, moments, signups, myID, ev.IsOpen())
+	p.AddPledges(lists, pledges)
+	return p, moments, nil
 }
 
 // ---- event page (overview, "Mes créneaux") ----

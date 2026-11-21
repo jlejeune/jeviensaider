@@ -108,9 +108,11 @@ func (s *Store) PurgeVolunteers(ctx context.Context, eventID int64) (int64, erro
 	return res.RowsAffected()
 }
 
-// DuplicateEvent copies the structure (stands, slots and moments, no
-// volunteers) of src into a new draft event. If both events have a date,
-// slots and moments are moved by the same number of days.
+// DuplicateEvent copies the structure (stands, slots, moments and pledge
+// lists, no volunteers or pledges) of src into a new draft event. If both
+// events have a date, slots and moments are moved by the same number of days.
+// Drop-off times of pledge lists are times of the day, so they stay as they
+// are.
 func (s *Store) DuplicateEvent(ctx context.Context, src *model.Event, title, date string) (*model.Event, error) {
 	dst := &model.Event{
 		Title: title, Date: date, Description: src.Description, Location: src.Location,
@@ -161,7 +163,12 @@ func (s *Store) DuplicateEvent(ctx context.Context, src *model.Event, title, dat
 				return err
 			}
 		}
-		return nil
+		// The ORDER BY gives the new lists IDs in the same order as the old ones.
+		_, err = tx.ExecContext(ctx,
+			`INSERT INTO pledge_lists (event_id, name, description, unit, drop_off, min_items, max_items)
+			 SELECT ?, name, description, unit, drop_off, min_items, max_items FROM pledge_lists WHERE event_id = ? ORDER BY id`,
+			dst.ID, src.ID)
+		return err
 	})
 	if err != nil {
 		return nil, err
@@ -170,9 +177,11 @@ func (s *Store) DuplicateEvent(ctx context.Context, src *model.Event, title, dat
 }
 
 // EventSummary is an event with counts, for the command-line admin tool.
+// Items is the sum of the quantities of its pledges.
 type EventSummary struct {
 	model.Event
 	Stands, Slots, Volunteers, Signups int
+	PledgeLists, Pledges, Items        int
 	LastDay                            time.Time
 }
 
@@ -183,6 +192,9 @@ func (s *Store) ListEventSummaries(ctx context.Context) ([]EventSummary, error) 
 		(SELECT count(*) FROM slots sl JOIN stands st ON st.id = sl.stand_id WHERE st.event_id = e.id),
 		(SELECT count(*) FROM volunteers v WHERE v.event_id = e.id),
 		(SELECT count(*) FROM signups sg JOIN volunteers v ON v.id = sg.volunteer_id WHERE v.event_id = e.id),
+		(SELECT count(*) FROM pledge_lists pl WHERE pl.event_id = e.id),
+		(SELECT count(*) FROM pledges p JOIN pledge_lists pl ON pl.id = p.list_id WHERE pl.event_id = e.id),
+		(SELECT COALESCE(sum(p.quantity), 0) FROM pledges p JOIN pledge_lists pl ON pl.id = p.list_id WHERE pl.event_id = e.id),
 		`+lastDayExpr+` AS last_day
 		FROM events e ORDER BY last_day DESC, e.id DESC`)
 	if err != nil {
@@ -194,7 +206,7 @@ func (s *Store) ListEventSummaries(ctx context.Context) ([]EventSummary, error) 
 		var e EventSummary
 		var created, last string
 		if err := rows.Scan(&e.ID, &e.Slug, &e.Title, &e.Description, &e.Location, &e.Date, &e.AdminToken, &e.Status, &created, &e.AdminEmail, &e.NotifySignups, &e.RetentionDays,
-			&e.Stands, &e.Slots, &e.Volunteers, &e.Signups, &last); err != nil {
+			&e.Stands, &e.Slots, &e.Volunteers, &e.Signups, &e.PledgeLists, &e.Pledges, &e.Items, &last); err != nil {
 			return nil, err
 		}
 		e.CreatedAt = parseTime(created)

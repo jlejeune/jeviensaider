@@ -26,7 +26,7 @@ secret links (random 256-bit tokens, base64url).
 | Role | Identified by | Can |
 |---|---|---|
 | **Visitor** | nothing | see an open event's planning, sign up |
-| **Volunteer** | personal link `/e/<slug>/me/<token>`, also kept in a cookie (`v<eventID>`, path `/e/<slug>`, HttpOnly, SameSite=Lax, 1 year) | see and cancel their slots, change their name and phone, replace their link |
+| **Volunteer** | personal link `/e/<slug>/me/<token>`, also kept in a cookie (`v<eventID>`, path `/e/<slug>`, HttpOnly, SameSite=Lax, 1 year) | see and cancel their slots and pledges, change their name and phone, replace their link |
 | **Organiser** | admin link `/a/<token>` | everything about one event |
 | **Super-admin** | shell access to the server | list, show and delete any event (`jeviensaider events`) |
 | **Creator** | the creation password, if `JEVIENSAIDER_CREATE_PASSWORD` is set | create (or duplicate) events |
@@ -58,6 +58,21 @@ secret links (random 256-bit tokens, base64url).
   token. No e-mail is ever asked or stored.
 - **Sign-up**: a volunteer on a slot, with an optional comment. One per
   (slot, volunteer).
+- **Pledge list**: belongs to an event. It is a list of things that people
+  promise to bring, such as cakes. It has no time slot. It has a name
+  (required) and five optional values: a description, a unit, a drop-off
+  time, a minimum and a maximum. At most **10** pledge lists per event.
+  - The unit is free text in the plural, up to 30 characters, such as
+    "gâteaux". The app writes it only when the count is above 1, because the
+    unit is in the plural: "14 gâteaux", but "1".
+  - The drop-off time is the time of day when people bring the items. It is
+    `HH:MM` on the event date. It has no end time and no "days before". The
+    app stores only the time of day, so the time follows the event date.
+  - The minimum and the maximum are whole numbers from 1 to 1000. They count
+    items, not people.
+- **Pledge**: the promise of one volunteer to bring items to one pledge list.
+  It holds a quantity from 1 to 20. One per (list, volunteer). At most
+  **200** pledges per list.
 
 Derived notions (computed, not stored):
 
@@ -69,6 +84,27 @@ Derived notions (computed, not stored):
 - **Public name**: public pages show the first word of the name, then the
   initial of each other word. "Marie Dupont" becomes "Marie D." and "Julien Le
   Jeune" becomes "Julien LJ.".
+- **Total** of a pledge list: the sum of its quantities.
+- **Items missing**: the minimum minus the total, or 0 when there is no
+  minimum or it is reached.
+- **Items left**: the maximum minus the total.
+- **Full**: a list is full when the total reaches the maximum.
+- **Pledge status**: one sentence that says where a list stands, with the
+  unit when there is one. Examples: "Rien de promis pour l'instant", "14
+  gâteaux promis sur 21 : il en manque 7, encore 16 places", "Complet : 30
+  gâteaux promis".
+
+Pledge rules:
+
+- One row per volunteer and list. A second pledge of the same volunteer on the
+  same list changes the quantity.
+- The minimum never refuses anyone. A list with no maximum refuses nobody,
+  until it has 200 pledges.
+- With a maximum, the app refuses a pledge or an increase that passes it. The
+  message gives the items left. Lowering a quantity is always allowed.
+- The organizer cannot set the maximum below the total or below the minimum.
+- Event status works as for slots. Only the organizer can add a pledge to a
+  draft or closed event.
 
 ## 4. Features
 
@@ -143,21 +179,54 @@ Derived notions (computed, not stored):
     background says how the slot stands (open, enough people, full), and the
     stripe shows the colour. A moment that tints a column wins over the stand
     in the cells that they share.
+- **"À apporter"**, after "Tous les créneaux", when the event has at least
+  one pledge list. It has one card per list:
+  - A card shows the name, the description, the drop-off time ("Dépôt à
+    8h30"), the pledge status and the public names. A quantity above 1 shows
+    after the name ("Marie D. (2)").
+  - There is no progress bar, because the bar counts places. The page shows no
+    total across lists. Lists add nothing to the number of places taken or
+    needed.
+  - "Je m'en charge" opens the pledge form (see 4.3). A volunteer who has
+    a pledge sees "Vous en apportez N" and "Changer" instead. A full list shows
+    "Complet" to everyone else.
+  - A closed event shows the cards with no button. A draft event shows no
+    list.
+  - Under the filter (`?todo=1`), a list shows only while it still wants
+    items. It is not full, and it has no minimum or is under it.
+  - An event with lists and no slots shows only this section. The page hides
+    "Tous les créneaux" and "Aucun créneau n'a encore été proposé.", and the
+    filter switch moves to "À apporter".
 - **"Mes créneaux"** (`/e/<slug>/me/<token>`), a tab next to "Tous les
   créneaux" once the browser knows the volunteer, and a link in the header:
   - After a first sign-up (`?welcome=1`): "Merci <nom> !".
   - The volunteer's slots as cards (day, time, stand, who else is there,
     overlap warning), with a summary (number of slots, total time, stands)
     and "Je ne peux plus venir" on each (while the event is open).
-  - "Ajouter à mon agenda" (`/e/<slug>/me/<token>/agenda.ics`), when the
-    volunteer has at least one slot: an iCalendar file with one entry per
-    slot (stand and event names, the stand description, the location and the
-    public event link) and two reminders, one day and one hour before. Times
-    are written without a time zone, like the stored times. Each entry has a
-    stable UID (event, slot, volunteer), so a second import updates the
-    entries that still exist. A cancelled or deleted slot stays in the
-    calendar app. Not available for a draft event (404), like the sign-up
-    form; a closed event still gives its file.
+  - "Ce que j'apporte": one card per pledge of the volunteer, with the list
+    name, "Vous en apportez N" and the drop-off time. While the event is open,
+    "Changer" opens the pledge form and "Je ne peux plus en apporter" cancels
+    the whole pledge (`POST /e/<slug>/me/<token>/pledges/<id>/delete`). The
+    route looks only at the pledges of this volunteer, so the pledge of
+    another volunteer gives 404. The count on the tab adds slots and pledges. A
+    volunteer with pledges and no slots sees no slot section.
+  - "Ajouter à mon agenda" (`/e/<slug>/me/<token>/agenda.ics`) shows when
+    the volunteer has at least one slot or one calendar entry for a pledge
+    (see below). It gives an iCalendar file with one entry per slot (stand and
+    event names, the stand description, the location and the public event
+    link) and two reminders, one day and one hour before. Times are written
+    without a time zone, like the stored times. Each slot entry has a stable
+    UID (event, slot, volunteer), so a second import updates the entries that
+    still exist. A cancelled or deleted slot stays in the calendar app. Not
+    available for a draft event (404), like the sign-up form; a closed event
+    still gives its file.
+    - A pledge gives an entry only when its list has a drop-off time and the
+      event has a date. The entry starts at the drop-off time and lasts 30
+      minutes. It has the same location, public link and two reminders.
+    - The summary is "À apporter : <list> (<event>)". The description is the
+      list description.
+    - The UID is `<slug>-p<listID>-<volunteerID>@jeviensaider`.
+    - Like the slot entries, it holds no name, phone or token.
   - "Encore un peu de temps ?": the slot that needs people most, to take too.
   - "Mes coordonnées": change name and phone (while the event is open).
   - Folded "Retrouver mes créneaux sur un autre appareil": the personal link
@@ -186,11 +255,44 @@ Derived notions (computed, not stored):
   Names are compared ignoring case and spacing.
 - Honeypot field against bots.
 
+Pledging to a pledge list uses `GET` and `POST /e/<slug>/lists/<id>/signup`.
+It works like a slot sign-up, with these differences:
+
+- The dialog (htmx) or page shows the list name, the description, the
+  drop-off time, the pledge status and who already pledged. It asks for a
+  quantity ("Combien en apportez-vous ?"), a name and an optional phone. It
+  has no comment field.
+- The form pre-fills the name and phone of a known volunteer. If that
+  volunteer already has a pledge on this list, it also pre-fills the
+  quantity, and the button reads "Enregistrer". Otherwise the quantity is 1
+  and the button reads "Je m'en charge".
+- The quantity is a whole number from 1 to 20. It stops at the items left
+  plus the quantity of the volunteer.
+- A second pledge on the same list changes the quantity. It does not add a
+  row.
+- A full list shows "Complet. Merci !" and no form. A volunteer who has a
+  pledge on it can still lower the quantity.
+- Refused: event not open, quantity out of range, total above the maximum,
+  and 200 pledges on the list. For a maximum, the message gives the most that
+  the person can hold: the items left plus what they hold now ("Vous ne
+  pouvez en apporter que 3 sur cette liste."). A refused pledge creates no
+  volunteer.
+- The app compares the total with the maximum and saves the pledge in one
+  transaction, so two people cannot take the last items.
+- A draft event gives 404, as for slots. A list has no end time, so it never
+  clashes with a slot, and the form shows no overlap warning.
+- A pledge from a new volunteer creates the volunteer, sets the cookie and
+  shows the personal link ("welcome"). Otherwise, the event page shows the
+  message "C'est noté ! Vous apportez 3 pour « Gâteaux sucrés ». Merci !".
+  The rule about a different name and the honeypot field are the same as for
+  slots.
+
 ### 4.4 Organiser page `/a/<token>`
 
 - One column that works on a phone (the badge "Organisation" in the header).
 - "Inscriptions": Brouillon / Ouvertes / Closes, with what each means.
-- Progress: places still needed, places taken, number of volunteers.
+- Progress: places still needed, places taken, number of volunteers. An
+  event with pledge lists and no slots does not show it.
 - "Les deux liens de l'événement": the secret organiser link and the public
   link (both with "Copier"), and a message ready to share ("Partager le
   message" opens the phone's share sheet, or copies it).
@@ -249,20 +351,65 @@ Derived notions (computed, not stored):
 - Volunteers, on each slot: full names and phones (with a call button),
   "Inscrire quelqu'un" by hand (allowed whatever the status, capacity still
   applies), "Retirer".
+- "À apporter", after the stands: the pledge lists. It looks like the stands:
+  the title shows the number of lists. The section has these parts:
+  - With two or more lists, it starts with an overall total, such as "Au
+    total : 17 promis sur 21". The total has no unit, because lists have
+    different units. The "sur" part shows only when every list has a minimum.
+    No other page shows a total across lists.
+  - A "Nouvelle liste" button, whose panel is open while the event has no
+    list (`POST /a/<token>/lists`). The form asks for a name (required) and an
+    optional description, drop-off time, unit, minimum and maximum.
+  - Each list is a card that folds. Its head shows the name, the drop-off time
+    and the pledge status. The cards start closed, except the list that the
+    organizer just changed: every action on a list comes back to
+    `/a/<token>?list=<id>#list-<id>`, with that card open. A value that is not
+    a list opens nothing.
+  - An open card shows the description, the buttons "Modifier" and "Inscrire
+    quelqu'un" (only one of the two panels is open at a time), and one line per
+    pledge. A line shows the full name, the phone (with a call button), the
+    quantity with the unit and "Retirer" (`POST /a/<token>/pledges/<id>/delete`).
+  - The panel "Modifier" has the same fields as the new list form
+    (`POST /a/<token>/lists/<id>`) and a button "Supprimer cette liste"
+    (`POST /a/<token>/lists/<id>/delete`). The deletion removes the list with
+    its pledges. It asks first and gives the number of pledges.
+  - "Inscrire quelqu'un" adds a pledge by hand (`POST /a/<token>/pledges`).
+    It works whatever the status of the event, and it sends no e-mail. The
+    maximum still applies. The button is hidden when the list is full. A name
+    that the event already has (same name, ignoring case and spacing) is the
+    same person, so a second pledge changes the quantity of the first.
+  - The organizer cannot set the maximum below the total or the minimum. For a
+    maximum below the total, the message names the total: "Il y a déjà 14
+    promis : le maximum doit être au moins 14." For a maximum below the
+    minimum, the message is "Le maximum doit être vide ou supérieur ou égal
+    au minimum."
+  - Lists show oldest first. They have no reorder buttons.
 - "Qui est où, et quand" (wide screens): the whole planning with full names,
   and the titles of the moments in its header. It shows only when the event
   has at least one slot.
 - CSV export (`;`, UTF-8 BOM for Excel, one line per sign-up and one per
-  missing person, formula injection neutralised).
+  missing person, formula injection neutralised). After the stands, it has
+  one line per pledge of each list. "Stand" is "À apporter · <list>". "Date"
+  is the event date, empty when the event has no date. "Début" is the
+  drop-off time, empty when the list has none. "Fin" is empty. The last
+  column, "Quantité", holds the quantity as a number with no unit. It is
+  empty on the slot lines. A list under its minimum gets one more line, "(il
+  en manque N)".
 - Planning as a PDF to print (`/a/<token>/planning.pdf`): one A4 page per
   stand, with a line per volunteer and an empty line per missing person.
   Lines and text shrink (down to a readable minimum) to keep a stand on one
   page; a longer stand continues on more pages, without cutting a slot when
-  it fits on one page.
-- Erase personal data (keeps stands and slots).
-- Duplicate the event (stands, slots and moments, shifted to a new date; asks
-  for the creation password when one is configured).
-- Delete the event.
+  it fits on one page. After the stands, each pledge list gets its own page,
+  and more pages when it is long. A page shows the name, the description, the
+  drop-off time and the pledge status. Then it has one line per pledge, with
+  the quantity, the name and the phone, and no empty line.
+- Erase personal data: the volunteers, with their sign-ups and pledges (keeps
+  stands, slots, moments and pledge lists).
+- Duplicate the event (stands, slots, moments and pledge lists, without
+  volunteers or pledges). It asks for the creation password when one is
+  configured. With a new date, slots and moments move by the same number of
+  days. A list keeps its drop-off time of day, minimum, maximum and unit.
+- Delete the event, with its pledge lists and pledges.
 - Shows when the event will be deleted automatically.
 - Sends the event's links to the organiser again, when e-mail is set up.
 
@@ -273,6 +420,18 @@ Derived notions (computed, not stored):
   to the current organiser address; this counts in the same limits.
 - On each sign-up and cancellation, if the organiser asked: who, which slot,
   phone and comment, and what is still missing.
+- On each pledge, change of quantity and cancellation of a pledge, if the
+  organizer asked. The e-mail gives the name, the quantity, the list, the
+  phone and the pledge status. The subject looks like `Inscription : Marie
+  Dupont – Gâteaux sucrés (à apporter)`. A cancellation e-mail has no
+  quantity and no phone, and its subject starts with "Désinscription".
+  - The quantity uses the unit of the list: "apporte 3 gâteaux pour « Gâteaux
+    sucrés »".
+  - A pledge e-mail and a slot sign-up e-mail count in the same hourly limit
+    for each event (§6). So slots and lists count together. The limit for the
+    whole site applies to both.
+  - A pledge that the organizer adds by hand sends no e-mail. A volunteer who
+    saves the same quantity again sends none either.
 - Sent in the background through SMTP (STARTTLS required by default, or
   implicit TLS; `none` only towards a loopback or private address). Temporary
   failures are retried (30 s, 2 min, 10 min) without blocking other mails;
@@ -291,6 +450,8 @@ Derived notions (computed, not stored):
   (default 60) when they chose none. `0`/`off` for `JEVIENSAIDER_RETENTION_DAYS`
   keeps events forever, whatever number an event stores. Then the field is
   hidden.
+- Pledge lists do not move the last day, because they have no end time. The
+  deletion removes the pledge lists and pledges with the rest.
 - The organiser sets the number when they create or edit the event. The field
   is optional: empty (the default shown as a placeholder) stores nothing, so
   the event follows `JEVIENSAIDER_RETENTION_DAYS`, even when it changes. Otherwise
@@ -314,6 +475,10 @@ Derived notions (computed, not stored):
 
 - `jeviensaider` — run the web server.
 - `jeviensaider events list|show|delete` — super-admin tool on the database.
+  - `show` prints a "Pledges" line: "N lists, N pledges, N items". Items is the
+    sum of the quantities.
+  - The `delete` preview adds the number of pledge lists and the number of
+    pledges to the line of each event.
 - `jeviensaider mail-test <address>` — send one test e-mail with the SMTP
   settings and print the server's error.
 - `jeviensaider -healthcheck` — for container health checks.
@@ -342,16 +507,20 @@ silently falls back to a default.
   builds HTML from text. htmx `eval` is off.
 - **Abuse limits**: 64 KB request bodies; POST rate limit per IP (per /64 for
   IPv6; behind a trusted proxy, the last `X-Forwarded-For` entry); 50 stands
-  and 500 slots per event; bounded memory for every in-memory counter.
+  and 500 slots per event; bounded memory for every in-memory counter. An
+  event has at most 10 pledge lists, and a pledge list has at most 200
+  pledges.
 - **E-mail abuse**: with SMTP on, the server refuses to start without a
   creation password (unless `JEVIENSAIDER_OPEN_CREATION=true`). Limits, all
   configurable: 3 mails with an event's links (creation, duplication or
   resend) per address per day, 30 per hour in total,
-  20 sign-up notifications per event per hour (then one "paused" notice),
+  20 sign-up or pledge notifications per event per hour (then one "paused"
+  notice),
   300 mails per hour overall. No CR/LF in headers.
 - **Privacy**: public pages show "Prénom N." only; phones are visible to the
   organiser and the volunteer only; `noindex`; personal data is erased on
-  request and deleted with the event.
+  request and deleted with the event. On a pledge list, public pages also
+  show the quantity next to the name.
 - **HTTPS**: HSTS and `Secure` cookies when served over HTTPS.
 
 ## 7. Architecture
@@ -369,12 +538,14 @@ cmd/jeviensaider/    main.go: wiring, server lifecycle, background loops
 internal/model/      domain types and pure rules (Slot.Check, fill status,
                      statuses, public names); BuildPlanning turns stands +
                      slots + moments + sign-ups into a ready-to-render view
+                     pledge.go: pledge lists and pledges, PledgeList.Check,
+                     PledgeListView (total, items missing, items left)
 internal/slotgen/    pure slot generator (start, end, step, min, max)
 internal/store/      SQLite access: one file per table group (events,
-                     stands, slots, moments, signups), cleanup.go for automatic
-                     deletion, retention.go for the deletion policy
-                     (default and maximum days), embedded migrations tracked with
-                     PRAGMA user_version
+                     stands, slots, moments, signups, pledge_lists, pledges),
+                     cleanup.go for automatic deletion, retention.go for the
+                     deletion policy (default and maximum days), embedded
+                     migrations tracked with PRAGMA user_version
 internal/mail/       SMTP sender, message formatting, background queue
 internal/ical/       iCalendar writer: text escaping, line folding, reminders
 internal/web/        HTTP handlers, middleware, templates, static files
@@ -387,9 +558,19 @@ internal/web/        HTTP handlers, middleware, templates, static files
   middleware.go      security headers, CSRF, body limit, rate limit, logs
   notify.go          organiser e-mails
   mailbudget.go      e-mail limits
+  admin_pledges.go   organizer handlers for pledge lists and pledges, and the
+                     overall total line. The section itself is in
+                     admin_pledges.templ.
+  pledges.go         pledge form and sign-up, cancel from the personal page,
+                     the drop-off entries of the calendar file
+  pledges.templ      the "À apporter" section of the event page, "Ce que
+                     j'apporte", the pledge form
+  pledge_view.go     wording of pledges: status text, unit, drop-off time,
+                     names
   export.go          CSV export
   agenda.go          the personal calendar file (.ics) of a volunteer
-  pdf.go             planning PDF (layout, then drawing with gopdf)
+  pdf.go             planning PDF (layout, then drawing with gopdf), with
+                     the pledge list pages
   *.templ            pages (templ); *_templ.go is generated by `make generate` (not committed)
   view.go            helpers shared by the pages (slot wording, urgent slots)
   static/            CSS, JS, htmx, Atkinson Hyperlegible font (OFL)
@@ -403,9 +584,11 @@ nothing about HTTP; `web` holds no SQL. Errors from `store`, `model` and
 
 ### Data
 
-Tables `events`, `stands`, `slots`, `moments`, `volunteers`, `signups`, all with
-`ON DELETE CASCADE` from the event down. Times are stored as
-`YYYY-MM-DD HH:MM` local wall-clock text. Migrations live in
+Tables `events`, `stands`, `slots`, `moments`, `volunteers`, `signups`,
+`pledge_lists`, `pledges`, all with `ON DELETE CASCADE` from the event down. A
+pledge also goes away with its list or its volunteer. Times are stored as
+`YYYY-MM-DD HH:MM` local wall-clock text. A drop-off time is stored as `HH:MM`
+text, or as an empty string. Migrations live in
 `internal/store/migrations/NNN_name.sql` and run in order at startup.
 
 ### Request flow
@@ -439,3 +622,11 @@ The code should stay small and readable by one person in an afternoon.
 - Several organisations or tenants; each organisation runs its own instance.
 - Translations: the interface is French only.
 - A JavaScript front-end framework or a build step.
+- A description of the food that a volunteer brings. A pledge holds a quantity
+  only.
+- An end time for a drop-off.
+- Several structured drop-off times for one pledge list.
+- A grid of empty boxes, as in a spreadsheet planning, where each volunteer
+  writes a name to promise one item.
+- Reordering of pledge lists.
+- A link between a pledge list and a stand.

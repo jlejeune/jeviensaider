@@ -35,6 +35,19 @@ func TestEventsCommand(t *testing.T) {
 	if err := st.CreateStand(ctx, stand); err != nil {
 		t.Fatal(err)
 	}
+	// One list with two pledges of 2 and 3 items.
+	list := &model.PledgeList{EventID: evs[0].ID, Name: "Gâteaux sucrés"}
+	if err := st.CreatePledgeList(ctx, list); err != nil {
+		t.Fatal(err)
+	}
+	for i, name := range []string{"Marie Dupont", "Paul Martin"} {
+		_, err := st.Pledge(ctx, store.PledgeRequest{
+			EventID: evs[0].ID, ListID: list.ID, Name: name, Quantity: i + 2, Admin: true,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	st.Close()
 
 	run := func(input string, args ...string) (int, string, string) {
@@ -69,14 +82,17 @@ func TestEventsCommand(t *testing.T) {
 		t.Fatalf("show: exit %d", code)
 	}
 	mustContain(out, "Fête de l'école", "1 stands", "https://example.org/e/"+evs[0].Slug, "https://example.org/a/"+evs[0].AdminToken)
+	mustContain(out, "Pledges", "1 lists, 2 pledges, 5 items")
 
 	// A typo in any argument deletes nothing.
 	if code, _, errOut := run("y\n", "delete", evs[0].Slug, "nope"); code != 1 || !strings.Contains(errOut, `no event "nope"`) {
 		t.Errorf("delete with typo: %d %q", code, errOut)
 	}
-	// Answering no keeps the event.
+	// Answering no keeps the event. The preview shows the lists and pledges.
 	if code, out, _ := run("n\n", "delete", evs[0].Slug); code != 0 || !strings.Contains(out, "Cancelled.") {
 		t.Errorf("delete cancelled: %d %q", code, out)
+	} else {
+		mustContain(out, "1 stands, 0 slots, 2 volunteers, 1 pledge lists, 2 pledges")
 	}
 	// Answering yes deletes it.
 	if code, out, _ := run("oui\n", "delete", evs[0].Slug); code != 0 || !strings.Contains(out, "Deleted "+evs[0].Slug) {

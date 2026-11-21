@@ -34,7 +34,7 @@ templ eventView(d eventPage) {
 								aria-current="page"
 							}
 						>
-							Mes créneaux <span class="count">{ itoa(len(d.P.MySlots)) }</span>
+							Mes créneaux <span class="count">{ itoa(len(d.P.MySlots) + len(d.P.MyPledges)) }</span>
 						</a>
 					</nav>
 				}
@@ -91,19 +91,29 @@ templ overview(d eventPage) {
 			}
 		</section>
 	}
-	<section class="all-slots">
-		<div class="section-head">
-			<h2>Tous les créneaux</h2>
-			<div hx-boost="true" hx-target="#planning" hx-select="#planning" hx-swap="outerHTML">
-				<a class={ "switch", templ.KV("on", d.TodoOnly) } href={ templ.SafeURL(todoURL(d.EventURL, !d.TodoOnly)) } role="switch" aria-checked={ boolStr(d.TodoOnly) }>
-					<span class="switch-track" aria-hidden="true"></span>
-					Seulement les places à prendre
-				</a>
+	// An event with lists and no slot shows only the lists.
+	if len(d.P.Columns) > 0 || len(d.P.Pledges) == 0 {
+		<section class="all-slots">
+			<div class="section-head">
+				<h2>Tous les créneaux</h2>
+				@todoSwitch(d)
 			</div>
-		</div>
-		@legend()
-		@planningView(d)
-	</section>
+			@legend()
+			@planningView(d)
+		</section>
+	}
+	@pledgeSection(d)
+}
+
+// todoSwitch turns the ?todo=1 filter on and off. The filter shows only what
+// still needs people or items.
+templ todoSwitch(d eventPage) {
+	<div hx-boost="true" hx-target="#planning" hx-select="#planning" hx-swap="outerHTML">
+		<a class={ "switch", templ.KV("on", d.TodoOnly) } href={ templ.SafeURL(todoURL(d.EventURL, !d.TodoOnly)) } role="switch" aria-checked={ boolStr(d.TodoOnly) }>
+			<span class="switch-track" aria-hidden="true"></span>
+			Seulement les places à prendre
+		</a>
+	</div>
 }
 
 templ legend() {
@@ -117,7 +127,9 @@ templ legend() {
 // grouped by time (phones).
 templ planningView(d eventPage) {
 	if len(d.P.Columns) == 0 {
-		<p class="empty">Aucun créneau n'a encore été proposé.</p>
+		if len(d.P.Pledges) == 0 {
+			<p class="empty">Aucun créneau n'a encore été proposé.</p>
+		}
 	} else if !d.P.HasSlots() {
 		// Moments but no slot (no stand, or stands without slots): the table
 		// would be empty, so the list is the planning, on every screen size.
@@ -241,7 +253,8 @@ templ slotBody(p *model.Planning, s *model.SlotView, showStand bool) {
 }
 
 // mySlots is the volunteer's own page: thanks after a first sign-up, their
-// slots, their calendar, their details and their personal link.
+// slots, what they bring, their calendar, their details and their personal
+// link.
 templ mySlots(d eventPage) {
 	<section class="me-tab">
 		if d.Welcome {
@@ -251,41 +264,50 @@ templ mySlots(d eventPage) {
 				<p>C'est noté, on compte sur vous.</p>
 			</div>
 		}
-		<section id="my-slots" aria-labelledby="my-slots-title">
-			<h2 id="my-slots-title">Mes créneaux</h2>
-			if len(d.P.MySlots) == 0 {
-				<p class="empty">Vous n'êtes inscrit·e sur aucun créneau. <a href={ templ.SafeURL(d.EventURL) }>Voir les créneaux</a></p>
-			} else {
-				<p class="meta">
-					{ itoa(len(d.P.MySlots)) } { plural(len(d.P.MySlots), "créneau", "créneaux") } · { durationFR(d.MyP.MyDuration()) } · { itoa(len(d.MyP.Stands)) } { plural(len(d.MyP.Stands), "stand", "stands") }
-					if d.P.HasClash {
-						· <span class="warn">⚠ créneaux en même temps</span>
+		// A volunteer who only brings items has no slot section.
+		if len(d.P.MySlots) > 0 || len(d.P.MyPledges) == 0 {
+			<section id="my-slots" aria-labelledby="my-slots-title">
+				<h2 id="my-slots-title">Mes créneaux</h2>
+				// Here, a volunteer with no slots has no pledges either.
+				if len(d.P.MySlots) == 0 && listsOnly(d.P) {
+					<p class="empty">Vous n'êtes inscrit·e nulle part pour l'instant. <a href={ templ.SafeURL(d.EventURL) }>Voir l'événement</a></p>
+				} else if len(d.P.MySlots) == 0 {
+					<p class="empty">Vous n'êtes inscrit·e sur aucun créneau. <a href={ templ.SafeURL(d.EventURL) }>Voir les créneaux</a></p>
+				} else {
+					<p class="meta">
+						{ itoa(len(d.P.MySlots)) } { plural(len(d.P.MySlots), "créneau", "créneaux") } · { durationFR(d.MyP.MyDuration()) } · { itoa(len(d.MyP.Stands)) } { plural(len(d.MyP.Stands), "stand", "stands") }
+						if d.P.HasClash {
+							· <span class="warn">⚠ créneaux en même temps</span>
+						}
+					</p>
+					for _, s := range d.P.MySlots {
+						<article class={ "card my-slot", templ.KV("clash", s.Clash) } style={ standStyle(s.Stand.Color) }>
+							<p class="when">{ capitalize(dayFR(s.StartsAt)) } · { timeRange(s.StartsAt, s.EndsAt) }</p>
+							<h3>{ s.Stand.Name }</h3>
+							<p class="muted">{ withOthers(s) }</p>
+							if s.Clash {
+								<p class="warn">⚠ En même temps qu'un autre de vos créneaux.</p>
+							}
+							if d.Event.IsOpen() {
+								<form method="post" action={ templ.SafeURL(d.MeURL + "/signups/" + i64(s.MySignupID) + "/delete") } data-confirm={ "Annuler votre inscription : " + s.Stand.Name + ", " + timeRange(s.StartsAt, s.EndsAt) + " ?" } class="cancel-form">
+									<button class="btn" type="submit">Je ne peux plus venir</button>
+								</form>
+							}
+						</article>
 					}
-				</p>
-				for _, s := range d.P.MySlots {
-					<article class={ "card my-slot", templ.KV("clash", s.Clash) } style={ standStyle(s.Stand.Color) }>
-						<p class="when">{ capitalize(dayFR(s.StartsAt)) } · { timeRange(s.StartsAt, s.EndsAt) }</p>
-						<h3>{ s.Stand.Name }</h3>
-						<p class="muted">{ withOthers(s) }</p>
-						if s.Clash {
-							<p class="warn">⚠ En même temps qu'un autre de vos créneaux.</p>
-						}
-						if d.Event.IsOpen() {
-							<form method="post" action={ templ.SafeURL(d.MeURL + "/signups/" + i64(s.MySignupID) + "/delete") } data-confirm={ "Annuler votre inscription : " + s.Stand.Name + ", " + timeRange(s.StartsAt, s.EndsAt) + " ?" } class="cancel-form">
-								<button class="btn" type="submit">Je ne peux plus venir</button>
-							</form>
-						}
-					</article>
 				}
-				<div class="agenda">
-					<a class="btn primary block" href={ templ.SafeURL(d.MeURL + "/agenda.ics") } download>
-						@iconCalendar()
-						Ajouter à mon agenda
-					</a>
-					<p class="hint center">Avec un rappel la veille et une heure avant. Si vous annulez un créneau, supprimez-le aussi de votre agenda.</p>
-				</div>
-			}
-		</section>
+			</section>
+		}
+		@myPledges(d)
+		if len(d.P.MySlots) > 0 || hasPledgeEntries(d.Event, d.P) {
+			<div class="agenda">
+				<a class="btn primary block" href={ templ.SafeURL(d.MeURL + "/agenda.ics") } download>
+					@iconCalendar()
+					Ajouter à mon agenda
+				</a>
+				<p class="hint center">Avec un rappel la veille et une heure avant. Si vous annulez une inscription, supprimez-la aussi de votre agenda.</p>
+			</div>
+		}
 		{{ next := urgentSlots(d.P, 1) }}
 		if len(next) > 0 {
 			<section class="nudge">
@@ -294,7 +316,11 @@ templ mySlots(d eventPage) {
 				<a class="btn outline-accent block" href={ signupURL(d.EventURL, next[0]) } hx-get={ string(signupURL(d.EventURL, next[0])) } hx-target="#modal">Je prends aussi ce créneau</a>
 			</section>
 		}
-		<a class="btn block" href={ templ.SafeURL(d.EventURL) }>Voir tous les créneaux</a>
+		if listsOnly(d.P) {
+			<a class="btn block" href={ templ.SafeURL(d.EventURL) }>Voir l'événement</a>
+		} else {
+			<a class="btn block" href={ templ.SafeURL(d.EventURL) }>Voir tous les créneaux</a>
+		}
 		<section class="card">
 			<h2>Mes coordonnées</h2>
 			<form method="post" action={ templ.SafeURL(d.MeURL) } class="stack">

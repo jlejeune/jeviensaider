@@ -208,6 +208,7 @@ func (c *eventsCmd) show(ctx context.Context, st *store.Store, args []string) er
 	fmt.Fprintf(w, "Organiser\t%s\n", orDash(e.AdminEmail))
 	fmt.Fprintf(w, "Created\t%s\n", e.CreatedAt.Local().Format("2006-01-02 15:04"))
 	fmt.Fprintf(w, "Content\t%d stands, %d slots, %d volunteers, %d sign-ups\n", e.Stands, e.Slots, e.Volunteers, e.Signups)
+	fmt.Fprintf(w, "Pledges\t%d lists, %d pledges, %d items\n", e.PledgeLists, e.Pledges, e.Items)
 	fmt.Fprintf(w, "Last day\t%s\n", e.LastDay.Format(model.DateLayout))
 	fmt.Fprintf(w, "Retention\t%s\n", c.retention(e))
 	fmt.Fprintf(w, "Expires\t%s\n", c.expires(e))
@@ -238,7 +239,8 @@ func (c *eventsCmd) delete(ctx context.Context, st *store.Store, args []string) 
 		}
 	}
 	for _, e := range targets {
-		fmt.Fprintf(c.out, "  %d  %s  %q  (%d stands, %d slots, %d volunteers)\n", e.ID, e.Slug, e.Title, e.Stands, e.Slots, e.Volunteers)
+		fmt.Fprintf(c.out, "  %d  %s  %q  (%d stands, %d slots, %d volunteers, %d pledge lists, %d pledges)\n",
+			e.ID, e.Slug, e.Title, e.Stands, e.Slots, e.Volunteers, e.PledgeLists, e.Pledges)
 	}
 	if !c.yes {
 		fmt.Fprintf(c.out, "Delete %d event(s) and all their data? This cannot be undone. [y/N] ", len(targets))

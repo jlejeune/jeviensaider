@@ -15,7 +15,8 @@ import (
 
 // The planning PDF: one A4 page per stand, with a table of its slots. Each
 // slot has a line per volunteer, then an empty line per missing person, to
-// fill in by hand on the day.
+// fill in by hand on the day. After the stands, each pledge list gets its
+// own pages, with one line per pledge: the quantity, the name and the phone.
 //
 // To keep a stand on one page, lines shrink from rowMax down to rowMin. A
 // stand with more lines than that continues on more pages; a slot is then
@@ -27,7 +28,7 @@ const (
 	margin       = 40.0
 	contentW     = pageW - 2*margin
 	bandH        = 8.0  // the stand's colour, across the top of the page
-	tableHeadH   = 22.0 // the "Créneau / Bénévoles / Téléphone" row
+	tableHeadH   = 22.0 // the header row, as "Créneau / Bénévoles / Téléphone"
 	footerH      = 18.0
 	rowMax       = 26.0 // comfortable line height
 	rowMin       = 15.0 // smallest line height still easy to write in
@@ -38,15 +39,28 @@ const (
 )
 
 // pdfBlock is a slot and its lines on one page: its volunteers, then nil for
-// each empty line.
+// each empty line. A pledge has no slot. Its time cell shows Label.
 type pdfBlock struct {
 	Slot  *model.SlotView
+	Label string
 	Lines []*model.SignupRow
 }
 
-// pdfPage is one page of a stand.
+// pdfTableHead holds the texts of the table header row.
+type pdfTableHead struct{ Time, Name, Phone string }
+
+// The header rows of the stand pages and of the pledge list pages.
+var (
+	standHead  = pdfTableHead{"Créneau", "Bénévoles", "Téléphone"}
+	pledgeHead = pdfTableHead{"Quantité", "Nom", "Téléphone"}
+)
+
+// pledgeColor is the colour of the band on the pledge list pages.
+const pledgeColor = "#8a5cc7"
+
+// pdfPage is one page of a stand or a pledge list.
 type pdfPage struct {
-	First  bool // the stand's first page, with its description
+	First  bool // the first page, with the description
 	Blocks []pdfBlock
 }
 
@@ -63,6 +77,17 @@ func standBlocks(st *model.StandView) []pdfBlock {
 			b.Lines = append(b.Lines, nil)
 		}
 		blocks = append(blocks, b)
+	}
+	return blocks
+}
+
+// pledgeBlocks makes one block per pledge of a list. The label is the
+// quantity, and the only line holds the name and the phone.
+func pledgeBlocks(l *model.PledgeListView) []pdfBlock {
+	var blocks []pdfBlock
+	for _, r := range l.Pledges {
+		line := &model.SignupRow{Name: r.Name, Phone: r.Phone}
+		blocks = append(blocks, pdfBlock{Label: itoa(r.Quantity), Lines: []*model.SignupRow{line}})
 	}
 	return blocks
 }
@@ -100,7 +125,7 @@ func paginate(blocks []pdfBlock, rowH, firstRoom, nextRoom float64) []pdfPage {
 			}
 			n := min(len(lines), free)
 			page := &pages[len(pages)-1]
-			page.Blocks = append(page.Blocks, pdfBlock{Slot: b.Slot, Lines: lines[:n]})
+			page.Blocks = append(page.Blocks, pdfBlock{Slot: b.Slot, Label: b.Label, Lines: lines[:n]})
 			used += float64(n) * rowH
 			lines = lines[n:]
 		}
@@ -115,13 +140,16 @@ func writePlanningPDF(w io.Writer, ev *model.Event, p *model.Planning, now time.
 		return err
 	}
 	d.pdf.SetInfo(gopdf.PdfInfo{Title: "Planning · " + ev.Title, Creator: "Je viens aider", CreationDate: now})
-	if len(p.Stands) == 0 {
+	if len(p.Stands) == 0 && len(p.Pledges) == 0 {
 		d.pdf.AddPage()
 		d.eventLine(ev)
 		d.text(margin, margin+40, contentW, 20, "Aucun stand pour l'instant.", false, 12, colText)
 	}
 	for _, st := range p.Stands {
 		d.stand(ev, st, p.MultiDay)
+	}
+	for _, l := range p.Pledges {
+		d.pledgeList(ev, l)
 	}
 	if d.err != nil {
 		return d.err
@@ -162,6 +190,37 @@ func newPDFDoc() (*pdfDoc, error) {
 func (d *pdfDoc) stand(ev *model.Event, st *model.StandView, multiDay bool) {
 	d.setFont(false, 10)
 	desc := d.wrap(st.Description, contentW, maxDescLines)
+	d.listing(ev, st.Name, st.Color, desc, standBlocks(st), "Aucun créneau.", standHead, multiDay)
+}
+
+// pledgeList draws the pages of one pledge list: one line per pledge, with
+// no empty line. The description gives the drop-off time and the status.
+func (d *pdfDoc) pledgeList(ev *model.Event, l *model.PledgeListView) {
+	// A pledge has no slot, so multiDay has no effect on its time cell.
+	d.listing(ev, l.Name, pledgeColor, d.pledgeDescLines(l), pledgeBlocks(l),
+		"Aucune inscription pour l'instant.", pledgeHead, false)
+}
+
+// pledgeDescLines wraps the description of a list, then its drop-off time
+// and its status, in the 10 pt font. The result has at most maxDescLines
+// lines. The drop-off time takes one line and the status gets the rest, so
+// both always show. The description gets what is left, if anything.
+func (d *pdfDoc) pledgeDescLines(l *model.PledgeListView) []string {
+	d.setFont(false, 10)
+	short := d.wrap(dropOffLabel(l.DropOff), contentW, 1)
+	short = append(short, d.wrap(pledgeStatus(l), contentW, maxDescLines-len(short))...)
+	var lines []string
+	if room := maxDescLines - len(short); room > 0 {
+		lines = d.wrap(l.Description, contentW, room)
+	}
+	return append(lines, short...)
+}
+
+// listing draws the pages of a stand or a pledge list: a colour band, the
+// name, the description lines on the first page, then the table of the
+// blocks. If there are no blocks, it writes the empty text instead of the
+// table. The description lines must be wrapped in the 10 pt font.
+func (d *pdfDoc) listing(ev *model.Event, name, color string, desc []string, blocks []pdfBlock, empty string, head pdfTableHead, multiDay bool) {
 	headH := func(first bool) float64 {
 		h := 16 + 30 + 10.0 // event line, stand name, gap
 		if first && len(desc) > 0 {
@@ -172,19 +231,18 @@ func (d *pdfDoc) stand(ev *model.Event, st *model.StandView, multiDay bool) {
 	room := func(first bool) float64 {
 		return pageH - 2*margin - headH(first) - tableHeadH - footerH
 	}
-	blocks := standBlocks(st)
 	rowH := rowHeight(blocks, room(true), room(false))
 	pages := paginate(blocks, rowH, room(true), room(false))
 
 	for i, pg := range pages {
 		d.pdf.AddPage()
-		d.fillRect(0, 0, pageW, bandH, standColor(st.Color))
+		d.fillRect(0, 0, pageW, bandH, standColor(color))
 		d.eventLine(ev)
-		name := st.Name
+		title := name
 		if !pg.First {
-			name += " (suite)"
+			title += " (suite)"
 		}
-		d.text(margin, margin+16, contentW, 30, name, true, 20, colText)
+		d.text(margin, margin+16, contentW, 30, title, true, 20, colText)
 		y := margin + 46.0
 		if pg.First && len(desc) > 0 {
 			for _, line := range desc {
@@ -195,9 +253,9 @@ func (d *pdfDoc) stand(ev *model.Event, st *model.StandView, multiDay bool) {
 		}
 		y += 10
 		if len(blocks) == 0 {
-			d.text(margin, y, contentW, 20, "Aucun créneau.", false, 11, colMuted)
+			d.text(margin, y, contentW, 20, empty, false, 11, colMuted)
 		} else {
-			d.table(pg.Blocks, y, rowH, multiDay)
+			d.table(pg.Blocks, y, rowH, head, multiDay)
 		}
 		if len(pages) > 1 {
 			d.text(margin, pageH-margin, contentW, 12, strconv.Itoa(i+1)+" / "+strconv.Itoa(len(pages)), false, 9, colMuted)
@@ -216,21 +274,26 @@ func (d *pdfDoc) eventLine(ev *model.Event) {
 	d.text(margin, margin, contentW, 14, strings.Join(parts, " · "), false, 10, colMuted)
 }
 
-// table draws the header row then the blocks' lines, from y down.
-func (d *pdfDoc) table(blocks []pdfBlock, y, rowH float64, multiDay bool) {
+// table draws the header row then the blocks' lines, from y down. The time
+// cell of a block without a slot shows its Label.
+func (d *pdfDoc) table(blocks []pdfBlock, y, rowH float64, head pdfTableHead, multiDay bool) {
 	xName, xPhone := margin+timeColW, margin+timeColW+nameColW
 	d.fillRect(margin, y, contentW, tableHeadH, colHead)
-	d.text(margin+6, y, timeColW-12, tableHeadH, "Créneau", true, 9, colText)
-	d.text(xName+6, y, nameColW-12, tableHeadH, "Bénévoles", true, 9, colText)
-	d.text(xPhone+6, y, phoneColW-12, tableHeadH, "Téléphone", true, 9, colText)
+	d.text(margin+6, y, timeColW-12, tableHeadH, head.Time, true, 9, colText)
+	d.text(xName+6, y, nameColW-12, tableHeadH, head.Name, true, 9, colText)
+	d.text(xPhone+6, y, phoneColW-12, tableHeadH, head.Phone, true, 9, colText)
 	d.strokeRect(margin, y, contentW, tableHeadH)
 	y += tableHeadH
 
 	size := fontSize(rowH)
 	for _, b := range blocks {
 		h := float64(len(b.Lines)) * rowH
-		// The slot's time, in a cell as tall as its lines.
-		d.text(margin+6, y, timeColW-12, min(rowH, h), when(multiDay, b.Slot.StartsAt, b.Slot.EndsAt), true, size, colText)
+		// The slot's time (or the label), in a cell as tall as its lines.
+		cell := b.Label
+		if b.Slot != nil {
+			cell = when(multiDay, b.Slot.StartsAt, b.Slot.EndsAt)
+		}
+		d.text(margin+6, y, timeColW-12, min(rowH, h), cell, true, size, colText)
 		d.strokeRect(margin, y, timeColW, h)
 		for _, su := range b.Lines {
 			d.strokeRect(xName, y, nameColW, rowH)

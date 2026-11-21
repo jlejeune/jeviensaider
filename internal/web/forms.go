@@ -36,6 +36,7 @@ const (
 	maxEmail            = 120
 	maxStandName        = 80
 	maxStandDescription = 1000
+	maxPledgeUnit       = 30 // the unit of a pledge list, such as "gâteaux"
 	maxName             = 80 // volunteer
 	maxPhone            = 30
 	maxComment          = 300
@@ -188,9 +189,18 @@ func (e userError) Error() string { return string(e) }
 // internal: the caller reports them with serverError.
 func userMessage(err error) (string, bool) {
 	var ue userError
+	var full *store.PledgeFullError
+	var tooLow *store.PledgeMaxError
 	switch {
 	case errors.As(err, &ue):
 		return string(ue), true
+	case errors.As(err, &full):
+		if full.Free == 0 {
+			return "Cette liste est complète.", true
+		}
+		return fmt.Sprintf("Vous ne pouvez en apporter que %d sur cette liste.", full.Free), true
+	case errors.As(err, &tooLow):
+		return fmt.Sprintf("Il y a déjà %d promis : le maximum doit être au moins %d.", tooLow.Total, tooLow.Total), true
 	case errors.Is(err, store.ErrSlotFull):
 		return "Ce créneau est déjà complet.", true
 	case errors.Is(err, store.ErrAlreadySigned):
@@ -213,8 +223,18 @@ func userMessage(err error) (string, bool) {
 		return "L'heure de fin doit être après l'heure de début.", true
 	case errors.Is(err, model.ErrSlotMin):
 		return "Le minimum doit être au moins 1.", true
-	case errors.Is(err, model.ErrSlotMax):
+	case errors.Is(err, model.ErrSlotMax), errors.Is(err, model.ErrPledgeRange):
 		return "Le maximum doit être vide ou supérieur ou égal au minimum.", true
+	case errors.Is(err, model.ErrPledgeNumber):
+		return fmt.Sprintf("Indiquez un nombre entre 1 et %d.", model.MaxPledgeItems), true
+	case errors.Is(err, model.ErrPledgeDropOff):
+		return msgPledgeDropOff, true
+	case errors.Is(err, store.ErrPledgeQuantity):
+		return msgPledgeQuantity, true
+	case errors.Is(err, store.ErrTooManyPledgeLists):
+		return fmt.Sprintf("Un événement ne peut pas avoir plus de %d listes à apporter.", store.MaxPledgeLists), true
+	case errors.Is(err, store.ErrTooManyPledges):
+		return fmt.Sprintf("Cette liste ne peut pas avoir plus de %d inscriptions.", store.MaxPledgesPerList), true
 	case errors.Is(err, slotgen.ErrTooMany):
 		return fmt.Sprintf("Trop de créneaux d'un coup (maximum %d) : vérifiez la durée.", slotgen.MaxSlots), true
 	}
@@ -273,6 +293,50 @@ func (s *Server) readSlotForm(r *http.Request, date string) (model.Slot, error) 
 		return sl, userError("Maximum : " + err.Error())
 	}
 	return sl, nil
+}
+
+// Messages that both the pledge form readers and userMessage use.
+const (
+	msgPledgeDropOff  = "Heure de dépôt invalide (exemple : 08:30)."
+	msgPledgeQuantity = "Indiquez un nombre entre 1 et 20."
+)
+
+// readPledgeList reads the form of a pledge list. The name is required. The
+// description, the unit, the drop-off time, the minimum and the maximum are
+// optional. An empty minimum or maximum means 0, which is unset. The list is
+// filled even when an error is returned, to show the form again.
+func readPledgeList(r *http.Request) (model.PledgeList, error) {
+	l := model.PledgeList{
+		Name:        clean(r.FormValue("name"), maxStandName, false),
+		Description: clean(r.FormValue("description"), maxStandDescription, true),
+		Unit:        clean(r.FormValue("unit"), maxPledgeUnit, false),
+		// The time is not cut: a cut time such as "08:30xyz" would look valid.
+		DropOff: strings.TrimSpace(r.FormValue("drop_off")),
+	}
+	if l.Name == "" {
+		return l, userError("Le nom de la liste est obligatoire.")
+	}
+	if !model.ValidDropOff(l.DropOff) {
+		return l, userError(msgPledgeDropOff)
+	}
+	var err error
+	if l.MinItems, err = formIntIn(r, "min", 0, 1, model.MaxPledgeItems); err != nil {
+		return l, userError("Minimum : " + err.Error())
+	}
+	if l.MaxItems, err = formIntIn(r, "max", 0, 1, model.MaxPledgeItems); err != nil {
+		return l, userError("Maximum : " + err.Error())
+	}
+	return l, l.Check()
+}
+
+// readPledgeQuantity reads how many items a volunteer brings: 1 when the
+// field is empty, else a number from 1 to model.MaxPledgeQuantity.
+func readPledgeQuantity(r *http.Request) (int, error) {
+	n, err := formIntIn(r, "quantity", 1, 1, model.MaxPledgeQuantity)
+	if err != nil {
+		return 0, userError(msgPledgeQuantity)
+	}
+	return n, nil
 }
 
 // volunteerForm is what a volunteer types in the sign-up form.

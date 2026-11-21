@@ -16,6 +16,31 @@ func day(s string) time.Time {
 	return t
 }
 
+// Pledge lists have no date. A pledge has a creation date, but it must not
+// keep an old event alive.
+func TestPledgeListsDoNotMoveLastDay(t *testing.T) {
+	s := openTest(t)
+	ev, _, _ := fixture(t, s, 0)
+	if _, err := s.db.Exec(`UPDATE events SET created_at = '2026-01-01 10:00:00' WHERE id = ?`, ev.ID); err != nil {
+		t.Fatal(err)
+	}
+	before, err := s.EventLastDay(ctx, ev.ID)
+	if err != nil || !before.Equal(day("2026-06-20")) {
+		t.Fatalf("EventLastDay before = %v, %v; want 2026-06-20", before, err)
+	}
+
+	l := newPledgeList(t, s, model.PledgeList{EventID: ev.ID, Name: "Gâteaux", DropOff: "23:59"})
+	rawPledge(t, s, l.ID, rawVolunteer(t, s, ev.ID, "Marie"), 2)
+	if _, err := s.db.Exec(`UPDATE pledges SET created_at = '2099-01-01 10:00:00'`); err != nil {
+		t.Fatal(err)
+	}
+
+	after, err := s.EventLastDay(ctx, ev.ID)
+	if err != nil || !after.Equal(before) {
+		t.Errorf("EventLastDay after = %v, %v; want %v", after, err, before)
+	}
+}
+
 func TestCleanup(t *testing.T) {
 	s := openTest(t)
 	backdate := func(id int64) {

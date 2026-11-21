@@ -34,16 +34,21 @@ var (
 	ErrTooManyStands = fmt.Errorf("event has the maximum of %d stands", MaxStands)
 	ErrTooManySlots  = fmt.Errorf("event has the maximum of %d slots", MaxSlots)
 
-	ErrTooManyMoments = fmt.Errorf("event has the maximum of %d moments", MaxMoments)
-	ErrMomentExists   = errors.New("event already has a moment at this time")
+	ErrTooManyMoments     = fmt.Errorf("event has the maximum of %d moments", MaxMoments)
+	ErrMomentExists       = errors.New("event already has a moment at this time")
+	ErrTooManyPledgeLists = fmt.Errorf("event has the maximum of %d pledge lists", MaxPledgeLists)
+	ErrTooManyPledges     = fmt.Errorf("list has the maximum of %d pledges", MaxPledgesPerList)
 )
 
 // Per-event limits. They keep the planning page to a reasonable size: without
 // them, one event could make every view of its page render megabytes.
+// MaxPledgesPerList is a limit for each list, not for each event.
 const (
-	MaxStands  = 50
-	MaxSlots   = 500
-	MaxMoments = 30
+	MaxStands         = 50
+	MaxSlots          = 500
+	MaxMoments        = 30
+	MaxPledgeLists    = 10
+	MaxPledgesPerList = 200
 )
 
 // querier is what queries need: a *sql.DB, or a *sql.Tx inside a

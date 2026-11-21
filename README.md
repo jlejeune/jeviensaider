@@ -26,6 +26,10 @@ in a single SQLite file.
 - Add the **moments of the day**, such as "Spectacle des enfants": a title, a
   start, an end and an optional color. Nobody signs up for a moment. It only tells everyone how
   the day runs.
+- Add **lists to bring**, such as cakes, next to the stands. Each list can
+  have a minimum, a maximum, a unit and a drop-off time on the day of the
+  event. The minimum and the maximum count items, not people. The admin page,
+  the CSV file, the PDF and the e-mails show who brings what.
 - Follow progress on a dashboard that shows who is signed up, with their
   contact details, and how many places are still missing.
 - Open and close sign-ups.
@@ -60,14 +64,20 @@ in a single SQLite file.
 - **"Mes créneaux"**: their own slots as cards (day, time, stand, who else
   is there), "Je ne peux plus venir" on each, and a warning when two of them
   are at the same time.
+- In **"À apporter"**, promise to bring some items, such as 2 cakes, with a
+  name and no account. This promise is a pledge. The number is from 1 to 20.
+  Change it later, or cancel it, in **"Mes créneaux"**, where "Ce que
+  j'apporte" shows each pledge.
 - An **"Ajouter à mon agenda"** button that downloads their slots as an
-  `.ics` file for any calendar app. Each entry has a reminder one day and one
-  hour before. The file does not contain the personal link, and it is not
-  available while the event is a draft. Importing it again updates the
-  entries of the slots that still exist and does not add copies. A slot that
-  the volunteer cancels, or that an organiser deletes, stays in the calendar
-  app until the volunteer removes it there. The times have no time zone, so a
-  calendar shows the same clock time as the event page.
+  `.ics` file for any calendar app. The file also has the drop-off time of
+  each pledge, when the list has a drop-off time and the event has a date.
+  Each entry has a reminder one day and one hour before. The file does not
+  contain the personal link, and it is not available while the event is a
+  draft. Importing it again updates the entries that still exist and does
+  not add copies. A slot or a pledge that the volunteer cancels, or that an
+  organiser deletes, stays in the calendar app until the volunteer removes it
+  there. The times have no time zone, so a calendar shows the same clock time
+  as the event page.
 
 ## Quick start
 
@@ -332,8 +342,9 @@ the code is organised.
     headers.
   - POSTs are rate-limited per IP (per /64 for IPv6). Behind a proxy, only
     the last `X-Forwarded-For` entry, the one the proxy adds, is trusted.
-  - Request bodies are capped at 64 KB, and an event has at most 50 stands
-    and 500 slots, so no single request or event can exhaust the server.
+  - Request bodies are capped at 64 KB. An event has at most 50 stands, 500
+    slots and 10 pledge lists, and a pledge list has at most 200 pledges. So
+    no single request or event can exhaust the server.
   - Over HTTPS, cookies are `Secure` and HSTS is sent. Pages that can show
     personal data are never cached, including by htmx's history cache.
   - Signing up under a different name from the one the browser remembers
@@ -344,7 +355,7 @@ the code is organised.
   - The CSV export guards against formula injection.
 - **Automatic cleanup.** At startup and then every hour, the app deletes
   every event whose last day is more than its number of days ago, together
-  with its stands, slots and volunteers. This number is the one that the
+  with its stands, slots, pledge lists and volunteers. This number is the one that the
   organiser chose, or `JEVIENSAIDER_RETENTION_DAYS` when they chose none. It
   is never more than `JEVIENSAIDER_RETENTION_MAX_DAYS`. An event's last day is
   the latest of its date, its last slot and its creation date, so an event

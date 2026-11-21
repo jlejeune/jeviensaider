@@ -61,21 +61,12 @@ templ signupForm(d signupPage, page bool) {
 			</div>
 		}
 		<form method="post" action={ templ.SafeURL(d.EventURL + "/slots/" + i64(d.Slot.ID) + "/signup") } class="stack">
-			<div class="field">
-				<label for="signup-name">Prénom et nom</label>
-				<input id="signup-name" aria-describedby="signup-name-hint" name="name" value={ d.Form.Name } required maxlength="80" autocomplete="name"/>
-				<span class="hint" id="signup-name-hint">Sur la page, les autres verront votre prénom et l'initiale de votre nom.</span>
-			</div>
-			<div class="field">
-				<label for="signup-phone"><span class="label-text">Téléphone <span class="opt">facultatif</span></span></label>
-				<input id="signup-phone" aria-describedby="signup-phone-hint" type="tel" name="phone" value={ d.Form.Phone } maxlength="30" autocomplete="tel"/>
-				<span class="hint" id="signup-phone-hint">Seuls les organisateurs le voient, pour vous joindre le jour J.</span>
-			</div>
-			<label>
-				<span class="label-text">Un mot pour l'équipe <span class="opt">facultatif</span></span>
-				<input name="comment" value={ d.Form.Comment } maxlength="300"/>
-			</label>
-			<label class="hp" aria-hidden="true">Site web <input name="website" tabindex="-1" autocomplete="off"/></label>
+			@volunteerFields("signup", d.Form.Name, d.Form.Phone) {
+				<label>
+					<span class="label-text">Un mot pour l'équipe <span class="opt">facultatif</span></span>
+					<input name="comment" value={ d.Form.Comment } maxlength="300"/>
+				</label>
+			}
 			<button type="submit" class="btn primary block big">
 				if len(d.Overlaps) > 0 {
 					M'inscrire quand même
@@ -86,6 +77,24 @@ templ signupForm(d signupPage, page bool) {
 			<p class="hint center">Pas d'e-mail, pas de compte. Vous pourrez annuler à tout moment.</p>
 		</form>
 	}
+}
+
+// volunteerFields are the name, phone and honeypot fields of the sign-up form
+// and of the pledge form. The prefix starts the IDs. The children go between
+// the phone and the honeypot.
+templ volunteerFields(prefix, name, phone string) {
+	<div class="field">
+		<label for={ prefix + "-name" }>Prénom et nom</label>
+		<input id={ prefix + "-name" } aria-describedby={ prefix + "-name-hint" } name="name" value={ name } required maxlength="80" autocomplete="name"/>
+		<span class="hint" id={ prefix + "-name-hint" }>Sur la page, les autres verront votre prénom et l'initiale de votre nom.</span>
+	</div>
+	<div class="field">
+		<label for={ prefix + "-phone" }><span class="label-text">Téléphone <span class="opt">facultatif</span></span></label>
+		<input id={ prefix + "-phone" } aria-describedby={ prefix + "-phone-hint" } type="tel" name="phone" value={ phone } maxlength="30" autocomplete="tel"/>
+		<span class="hint" id={ prefix + "-phone-hint" }>Seuls les organisateurs le voient, pour vous joindre le jour J.</span>
+	</div>
+	{ children... }
+	<label class="hp" aria-hidden="true">Site web <input name="website" tabindex="-1" autocomplete="off"/></label>
 }
 
 templ standView(d standPage) {

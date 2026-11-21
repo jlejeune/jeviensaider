@@ -1,0 +1,133 @@
+package web
+
+import "jeviensaider/internal/model"
+
+// adminPledges is the "À apporter" section: the pledge lists, who brought what,
+// and the form of a new list. It follows the layout of the stands: a count in
+// the title, a button that opens the form of a new list, and one card for each
+// list.
+templ adminPledges(d adminPage) {
+	<section id="pledges" class="admin-section" aria-labelledby="pledges-title">
+		<div class="section-head">
+			<h2 id="pledges-title">À apporter <span class="section-count">{ itoa(len(d.P.Pledges)) }</span></h2>
+		</div>
+		if line := pledgeTotalLine(d.P); line != "" {
+			<p><strong>{ line }</strong></p>
+		}
+		<details class="tool" open?={ len(d.P.Pledges) == 0 }>
+			<summary class="btn tonal">
+				@iconPlus()
+				Nouvelle liste
+			</summary>
+			<form method="post" action={ templ.SafeURL(d.AdminPath + "/lists") } class="panel">
+				<h3>Nouvelle liste</h3>
+				@pledgeListFields(model.PledgeList{})
+				@panelFoot("Ajouter la liste")
+			</form>
+		</details>
+		if len(d.P.Pledges) == 0 {
+			<p class="empty">Aucune liste pour l'instant, par exemple « Gâteaux sucrés ».</p>
+		}
+		for _, l := range d.P.Pledges {
+			@adminPledgeList(d, l)
+		}
+	</section>
+}
+
+// adminPledgeList is the card of one list. Like the card of a stand, it starts
+// closed, and it opens after a change to the list (?list=<id>).
+templ adminPledgeList(d adminPage, l *model.PledgeListView) {
+	<details class="stand" id={ "list-" + i64(l.ID) } open?={ l.ID == d.OpenList }>
+		<summary class="stand-head">
+			<h3>{ l.Name }</h3>
+			<span class="stand-stats">
+				if label := dropOffLabel(l.DropOff); label != "" {
+					{ label } ·
+				}
+				<strong class={ "stand-status", templ.KV("need-text", l.Missing > 0) }>{ pledgeStatus(l) }</strong>
+			</span>
+		</summary>
+		<div class="stand-body">
+			if l.Description != "" {
+				<p class="muted">{ l.Description }</p>
+			}
+			<div class="stand-tools">
+				<details class="tool" name={ "list-tools-" + i64(l.ID) }>
+					<summary class="btn small">
+						@iconEdit()
+						Modifier
+					</summary>
+					<div class="panel">
+						<h4>Modifier « { l.Name } »</h4>
+						<form method="post" action={ templ.SafeURL(d.AdminPath + "/lists/" + i64(l.ID)) } class="stack">
+							@pledgeListFields(l.PledgeList)
+							@panelFoot("Enregistrer")
+						</form>
+						<form method="post" action={ templ.SafeURL(d.AdminPath + "/lists/" + i64(l.ID) + "/delete") } data-confirm={ deleteListConfirm(l) } class="panel-danger">
+							<button class="btn danger-text" type="submit">Supprimer cette liste</button>
+						</form>
+					</div>
+				</details>
+				if !l.Full {
+					<details class="tool" name={ "list-tools-" + i64(l.ID) }>
+						<summary class="btn small">
+							@iconPlus()
+							Inscrire quelqu'un
+						</summary>
+						<div class="panel">
+							<h4>Inscrire quelqu'un sur « { l.Name } »</h4>
+							<form method="post" action={ templ.SafeURL(d.AdminPath + "/pledges") } class="stack">
+								<input type="hidden" name="list" value={ i64(l.ID) }/>
+								<p class="hint">Pour quelqu'un qui a répondu par téléphone ou sur papier, même si les inscriptions sont closes.</p>
+								<label>Prénom et nom <input name="name" required maxlength="80"/></label>
+								<label><span class="label-text">Téléphone <span class="opt">facultatif</span></span> <input type="tel" name="phone" maxlength="30"/></label>
+								<label>Quantité <input type="number" name="quantity" value="1" min="1" max={ itoa(model.MaxPledgeQuantity) } required/></label>
+								@panelFoot("Inscrire")
+							</form>
+						</div>
+					</details>
+				}
+			</div>
+			if len(l.Pledges) > 0 {
+				<ul class="people">
+					for _, p := range l.Pledges {
+						<li>
+							<span class="grow">
+								<strong>{ p.Name }</strong>
+								if p.Phone != "" {
+									<span class="muted">{ p.Phone }</span>
+								}
+							</span>
+							<strong class="count">{ unitCount(p.Quantity, l.Unit) }</strong>
+							if p.Phone != "" {
+								<a class="btn icon" href={ templ.URL("tel:" + p.Phone) } aria-label={ "Appeler " + p.Name }>@iconPhone()</a>
+							}
+							<form method="post" action={ templ.SafeURL(d.AdminPath + "/pledges/" + i64(p.ID) + "/delete") } data-confirm={ "Retirer " + p.Name + " de cette liste ?" }>
+								<button type="submit" class="btn danger-text small">Retirer</button>
+							</form>
+						</li>
+					}
+				</ul>
+			}
+		</div>
+	</details>
+}
+
+// pledgeListFields are the fields of the new list form and of the edit form.
+// An unset minimum or maximum is an empty field, because the server refuses 0.
+templ pledgeListFields(l model.PledgeList) {
+	<label>Nom <input name="name" value={ l.Name } required maxlength="80"/></label>
+	<label><span class="label-text">Description <span class="opt">facultatif</span></span> <textarea name="description" rows="2" maxlength="1000">{ l.Description }</textarea></label>
+	<div class="row2">
+		<label><span class="label-text">Heure de dépôt <span class="opt">facultatif</span></span> <input type="time" name="drop_off" value={ l.DropOff }/></label>
+		<label>
+			<span class="label-text">Unité <span class="opt">facultatif</span></span>
+			<input name="unit" value={ l.Unit } maxlength="30"/>
+			<span class="hint">Au pluriel, par exemple « gâteaux ».</span>
+		</label>
+	</div>
+	<div class="row2">
+		<label><span class="label-text">Minimum <span class="opt">facultatif</span></span> <input type="number" name="min" value={ maxValue(l.MinItems) } min="1" max={ itoa(model.MaxPledgeItems) }/></label>
+		<label><span class="label-text">Maximum <span class="opt">facultatif</span></span> <input type="number" name="max" value={ maxValue(l.MaxItems) } min="1" max={ itoa(model.MaxPledgeItems) }/></label>
+	</div>
+}

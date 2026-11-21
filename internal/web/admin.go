@@ -91,6 +91,17 @@ type adminPage struct {
 	// OpenStand is the stand whose card is open: the one that the organiser
 	// just changed (?stand=<id>), else none.
 	OpenStand int64
+	// OpenList is the same for a pledge list (?list=<id>).
+	OpenList int64
+}
+
+// openList is the pledge list whose card is open, from ?list=<id>.
+func openList(r *http.Request) int64 {
+	id, err := strconv.ParseInt(r.URL.Query().Get("list"), 10, 64)
+	if err != nil {
+		return 0
+	}
+	return id
 }
 
 func openStand(r *http.Request) int64 {
@@ -142,6 +153,7 @@ func (s *Server) adminPage(w http.ResponseWriter, r *http.Request, ev *model.Eve
 		RetentionField: s.retentionField(ev.RetentionDays),
 		NeedPassword:   s.cfg.CreatePassword != "",
 		OpenStand:      openStand(r),
+		OpenList:       openList(r),
 		MailEnabled:    s.cfg.MailEnabled,
 	}))
 }
@@ -540,7 +552,8 @@ func (s *Server) adminDeleteEvent(w http.ResponseWriter, r *http.Request, ev *mo
 
 // ---- planning PDF ----
 
-// adminPDF sends the planning as a PDF to print: one page per stand.
+// adminPDF sends the planning as a PDF to print: one page per stand, then one
+// page per pledge list.
 func (s *Server) adminPDF(w http.ResponseWriter, r *http.Request, ev *model.Event) {
 	p, err := s.planning(r.Context(), ev, 0)
 	if err != nil {

@@ -68,6 +68,23 @@ Pour ne plus recevoir ces e-mails : page d'administration, « Modifier l'événe
 Je viens aider
 {{end}}
 
+{{define "pledge"}}Bonjour,
+
+{{.Name}} {{if .Cancel}}s'est désinscrit·e de « {{.List.Name}} »{{else}}apporte {{count .Quantity .List.Unit}} pour « {{.List.Name}} »{{end}}.
+{{if not .Cancel}}
+Téléphone : {{or .Phone "non renseigné"}}
+{{end}}
+{{.Status}}.
+
+Voir le planning et les coordonnées :
+{{.AdminURL}}
+
+Pour ne plus recevoir ces e-mails : page d'administration, « Modifier l'événement ».
+
+-- 
+Je viens aider
+{{end}}
+
 {{define "paused"}}Bonjour,
 
 Plus de {{.Limit}} inscriptions ou désinscriptions ont eu lieu en une heure sur votre événement. Pour ne pas encombrer votre boîte, les notifications sont en pause jusqu'à {{.Until}}.
@@ -130,10 +147,45 @@ func (s *Server) sendLinks(r *http.Request, ev *model.Event, resent bool) bool {
 	})
 }
 
+// notifiesSignups says whether the organiser wants an e-mail for each
+// sign-up and the server can send it.
+func (s *Server) notifiesSignups(ev *model.Event) bool {
+	return ev.NotifySignups && ev.AdminEmail != "" && s.cfg.Mailer != nil
+}
+
+// allowSignupNotice applies the hourly limit of the event to a sign-up
+// e-mail, whether it is for a slot or a pledge list. It reports whether the
+// e-mail can go out. When the limit is first exceeded, it sends the "paused"
+// e-mail instead and reports false.
+func (s *Server) allowSignupNotice(r *http.Request, ev *model.Event) bool {
+	switch notice, until := s.mails.signupNotice(ev.ID, s.now()); notice {
+	case noticeSkip:
+		return false
+	case noticePause:
+		s.sendMail(mail.Message{
+			To:      ev.AdminEmail,
+			Subject: "Beaucoup d'inscriptions sur « " + ev.Title + " » : notifications en pause",
+			Body: renderMail("paused", map[string]any{
+				"Limit": s.mails.limits.SignupsPerEventPerHour, "Until": hm(until.Local()), "AdminURL": s.absURL(r, adminURL(ev)),
+			}),
+		})
+		return false
+	}
+	return true
+}
+
+// noticeVerb starts the subject of a sign-up e-mail.
+func noticeVerb(cancel bool) string {
+	if cancel {
+		return "Désinscription"
+	}
+	return "Inscription"
+}
+
 // notifySignup tells the organiser that someone signed up for, or cancelled,
 // a slot, if they asked for these messages.
 func (s *Server) notifySignup(ctx context.Context, r *http.Request, ev *model.Event, vol *model.Volunteer, slotID int64, comment string, cancel bool) {
-	if !ev.NotifySignups || ev.AdminEmail == "" || s.cfg.Mailer == nil {
+	if !s.notifiesSignups(ev) {
 		return
 	}
 	p, err := s.planning(ctx, ev, 0)
@@ -145,26 +197,12 @@ func (s *Server) notifySignup(ctx context.Context, r *http.Request, ev *model.Ev
 	if sv == nil {
 		return
 	}
-	switch notice, until := s.mails.signupNotice(ev.ID, s.now()); notice {
-	case noticeSkip:
+	if !s.allowSignupNotice(r, ev) {
 		return
-	case noticePause:
-		s.sendMail(mail.Message{
-			To:      ev.AdminEmail,
-			Subject: "Beaucoup d'inscriptions sur « " + ev.Title + " » : notifications en pause",
-			Body: renderMail("paused", map[string]any{
-				"Limit": s.mails.limits.SignupsPerEventPerHour, "Until": hm(until.Local()), "AdminURL": s.absURL(r, adminURL(ev)),
-			}),
-		})
-		return
-	}
-	verb := "Inscription"
-	if cancel {
-		verb = "Désinscription"
 	}
 	s.sendMail(mail.Message{
 		To:      ev.AdminEmail,
-		Subject: verb + " : " + vol.Name + " – " + sv.Stand.Name + ", " + timeRange(sv.StartsAt, sv.EndsAt),
+		Subject: noticeVerb(cancel) + " : " + vol.Name + " – " + sv.Stand.Name + ", " + timeRange(sv.StartsAt, sv.EndsAt),
 		Body: renderMail("signup", map[string]any{
 			"Name":     vol.Name,
 			"Phone":    vol.Phone,
@@ -172,6 +210,41 @@ func (s *Server) notifySignup(ctx context.Context, r *http.Request, ev *model.Ev
 			"Cancel":   cancel,
 			"Slot":     sv,
 			"P":        p,
+			"AdminURL": s.absURL(r, adminURL(ev)),
+		}),
+	})
+}
+
+// notifyPledge tells the organiser that someone pledged items to a list,
+// changed their quantity or cancelled, if they asked for these messages. It
+// uses the same guard and the same hourly limit as notifySignup, so slots and
+// lists count together. A cancel has no quantity: pass 0.
+func (s *Server) notifyPledge(ctx context.Context, r *http.Request, ev *model.Event, vol *model.Volunteer, listID int64, quantity int, cancel bool) {
+	if !s.notifiesSignups(ev) {
+		return
+	}
+	p, err := s.planning(ctx, ev, 0)
+	if err != nil {
+		s.log.Error("notify: load planning", "err", err)
+		return
+	}
+	l := p.PledgeListByID(listID)
+	if l == nil {
+		return
+	}
+	if !s.allowSignupNotice(r, ev) {
+		return
+	}
+	s.sendMail(mail.Message{
+		To:      ev.AdminEmail,
+		Subject: noticeVerb(cancel) + " : " + vol.Name + " – " + l.Name + " (à apporter)",
+		Body: renderMail("pledge", map[string]any{
+			"Name":     vol.Name,
+			"Phone":    vol.Phone,
+			"Cancel":   cancel,
+			"Quantity": quantity,
+			"List":     l,
+			"Status":   pledgeStatus(l),
 			"AdminURL": s.absURL(r, adminURL(ev)),
 		}),
 	})

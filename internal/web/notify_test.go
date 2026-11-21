@@ -162,3 +162,151 @@ func TestResendLinksWithoutSMTP(t *testing.T) {
 	expect(t, e.post(admin, adminPath+"/resend", nil), http.StatusSeeOther)
 	expect(t, e.get(admin, adminPath), 200, "pas configuré sur ce serveur")
 }
+
+// openNotifiedEvent creates an open event dated 2026-06-20 that e-mails the
+// organizer about each sign-up. It returns the admin path and the public path.
+// It drops the creation mail from fm.
+func openNotifiedEvent(t *testing.T, e *env, fm *fakeMailer, admin *http.Client) (adminPath, pub string) {
+	t.Helper()
+	r := e.post(admin, "/events", url.Values{"admin_email": {"orga@example.org"}, "title": {"Kermesse"}, "date": {"2026-06-20"}, "notify": {"1"}})
+	expect(t, r, http.StatusSeeOther)
+	adminPath = r.location
+	expect(t, e.post(admin, adminPath+"/status", url.Values{"status": {"open"}}), http.StatusSeeOther)
+	pub = publicRe.FindStringSubmatch(e.get(admin, adminPath).body)[1]
+	fm.take()
+	return adminPath, pub
+}
+
+func TestPledgeEmail(t *testing.T) {
+	fm := &fakeMailer{}
+	e := newEnv(t, Config{Mailer: fm, MailEnabled: true, BaseURL: "https://jeviensaider.example"})
+	admin := e.client()
+	adminPath, pub := openNotifiedEvent(t, e, fm, admin)
+	id := addList(t, e, admin, adminPath, url.Values{"name": {"Gâteaux sucrés"}, "unit": {"gâteaux"}, "min": {"21"}})
+
+	// A pledge: the organizer reads who brings what and how the list stands.
+	marie := e.client()
+	r := pledge(e, marie, pub, id, "Marie Dupont", 2)
+	expect(t, r, http.StatusSeeOther)
+	msgs := fm.take()
+	if len(msgs) != 1 {
+		t.Fatalf("%d messages after a pledge, want 1", len(msgs))
+	}
+	m := msgs[0]
+	if m.To != "orga@example.org" || m.Subject != "Inscription : Marie Dupont – Gâteaux sucrés (à apporter)" {
+		t.Errorf("pledge mail: %+v", m)
+	}
+	for _, want := range []string{
+		"Marie Dupont apporte 2 gâteaux pour « Gâteaux sucrés »", "Téléphone : 07 11 22 33 44",
+		"2 gâteaux promis sur 21 : il en manque 19", "https://jeviensaider.example" + adminPath,
+		"Pour ne plus recevoir ces e-mails",
+	} {
+		if !strings.Contains(m.Body, want) {
+			t.Errorf("pledge mail lacks %q:\n%s", want, m.Body)
+		}
+	}
+
+	// A change of quantity sends the same mail with the new number.
+	expect(t, pledge(e, marie, pub, id, "Marie Dupont", 3), http.StatusSeeOther)
+	msgs = fm.take()
+	if len(msgs) != 1 || msgs[0].Subject != m.Subject ||
+		!strings.Contains(msgs[0].Body, "Marie Dupont apporte 3 gâteaux") || !strings.Contains(msgs[0].Body, "3 gâteaux promis sur 21 : il en manque 18") {
+		t.Fatalf("change mail: %+v", msgs)
+	}
+
+	// The same quantity again changes nothing, so it sends no mail.
+	expect(t, pledge(e, marie, pub, id, "Marie Dupont", 3), http.StatusSeeOther)
+	if msgs := fm.take(); len(msgs) != 0 {
+		t.Fatalf("mail after saving the same quantity: %+v", msgs)
+	}
+
+	// A cancel: the subject starts with "Désinscription" and the body has no quantity.
+	meLink := strings.TrimSuffix(r.location, "?welcome=1")
+	pledgeID := pledgeIDRe.FindStringSubmatch(e.get(marie, meLink).body)[1]
+	expect(t, e.post(marie, meLink+"/pledges/"+pledgeID+"/delete", nil), http.StatusSeeOther)
+	msgs = fm.take()
+	if len(msgs) != 1 || msgs[0].Subject != "Désinscription : Marie Dupont – Gâteaux sucrés (à apporter)" {
+		t.Fatalf("cancel mail: %+v", msgs)
+	}
+	for _, want := range []string{"Marie Dupont s'est désinscrit·e de « Gâteaux sucrés »", "Rien de promis pour l'instant : il en manque 21", "https://jeviensaider.example" + adminPath} {
+		if !strings.Contains(msgs[0].Body, want) {
+			t.Errorf("cancel mail lacks %q:\n%s", want, msgs[0].Body)
+		}
+	}
+	for _, bad := range []string{"apporte", "gâteaux pour", "Téléphone"} {
+		if strings.Contains(msgs[0].Body, bad) {
+			t.Errorf("cancel mail has %q:\n%s", bad, msgs[0].Body)
+		}
+	}
+
+	// The organizer turns notifications off: no more messages.
+	expect(t, e.post(admin, adminPath+"/event", url.Values{"title": {"Kermesse"}, "date": {"2026-06-20"}, "admin_email": {"orga@example.org"}}), http.StatusSeeOther)
+	expect(t, pledge(e, e.client(), pub, id, "Paul Martin", 1), http.StatusSeeOther)
+	if msgs := fm.take(); len(msgs) != 0 {
+		t.Fatalf("messages sent although notifications are off: %+v", msgs)
+	}
+}
+
+// The organizer already knows about a pledge that they add by hand, and a
+// refused pledge changes nothing. Neither sends a mail.
+func TestPledgeEmailNotSent(t *testing.T) {
+	fm := &fakeMailer{}
+	e := newEnv(t, Config{Mailer: fm, MailEnabled: true, BaseURL: "https://jeviensaider.example"})
+	admin := e.client()
+	adminPath, pub := openNotifiedEvent(t, e, fm, admin)
+	id := addList(t, e, admin, adminPath, url.Values{"name": {"Gâteaux sucrés"}, "max": {"2"}})
+
+	// The hand add fills the list.
+	expect(t, addPledge(e, admin, adminPath, id, "Marie Dupont", 2), http.StatusSeeOther)
+	expect(t, e.get(admin, adminPath), 200, "Marie Dupont a été inscrit·e.")
+	if msgs := fm.take(); len(msgs) != 0 {
+		t.Fatalf("the hand add sent mail: %+v", msgs)
+	}
+
+	// A visitor meets a full list.
+	expect(t, pledge(e, e.client(), pub, id, "Paul Martin", 1), http.StatusConflict, "Cette liste est complète.")
+	if msgs := fm.take(); len(msgs) != 0 {
+		t.Fatalf("a refused pledge sent mail: %+v", msgs)
+	}
+
+	// A visitor meets a closed event.
+	expect(t, e.post(admin, adminPath+"/status", url.Values{"status": {"closed"}}), http.StatusSeeOther)
+	expect(t, pledge(e, e.client(), pub, id, "Léa Petit", 1), http.StatusConflict)
+	if msgs := fm.take(); len(msgs) != 0 {
+		t.Fatalf("a pledge on a closed event sent mail: %+v", msgs)
+	}
+}
+
+// Slot sign-ups and pledges use the same hourly limit. The organizer reads
+// one "notifications en pause" mail, then nothing.
+func TestPledgeEmailSharesHourlyLimit(t *testing.T) {
+	const limit = 3
+	fm := &fakeMailer{}
+	e := newEnv(t, Config{Mailer: fm, MailEnabled: true, BaseURL: "https://jeviensaider.example", MailLimits: &MailLimits{SignupsPerEventPerHour: limit}})
+	admin := e.client()
+	adminPath, pub, slot := openEventWithSlot(t, e, admin, url.Values{"title": {"Fête"}, "admin_email": {"orga@example.org"}, "notify": {"1"}})
+	id := addList(t, e, admin, adminPath, url.Values{"name": {"Gâteaux sucrés"}, "unit": {"gâteaux"}})
+	fm.take()
+
+	// Two sign-ups and one pledge use the whole limit.
+	e.signUp(e.client(), pub, slot, "Anne")
+	expect(t, pledge(e, e.client(), pub, id, "Bruno", 1), http.StatusSeeOther)
+	e.signUp(e.client(), pub, slot, "Chloé")
+	if msgs := fm.take(); len(msgs) != limit {
+		t.Fatalf("%d messages within the limit, want %d: %+v", len(msgs), limit, msgs)
+	}
+
+	// The next pledge goes over the limit: one pause notice.
+	expect(t, pledge(e, e.client(), pub, id, "David", 1), http.StatusSeeOther)
+	msgs := fm.take()
+	if len(msgs) != 1 || !strings.Contains(msgs[0].Subject, "notifications en pause") || !strings.Contains(msgs[0].Body, adminPath) {
+		t.Fatalf("pause notice: %+v", msgs)
+	}
+
+	// After that, a sign-up and a pledge send nothing.
+	e.signUp(e.client(), pub, slot, "Éva")
+	expect(t, pledge(e, e.client(), pub, id, "Farid", 1), http.StatusSeeOther)
+	if msgs := fm.take(); len(msgs) != 0 {
+		t.Fatalf("messages over the limit: %+v", msgs)
+	}
+}

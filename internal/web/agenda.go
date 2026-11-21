@@ -14,8 +14,9 @@ import (
 // plan the day, and one hour before, to leave on time.
 var reminders = []time.Duration{24 * time.Hour, time.Hour}
 
-// meCalendar sends the slots of one volunteer as an iCalendar file. It
-// gives a volunteer a reminder without storing an e-mail address.
+// meCalendar sends the slots of one volunteer as an iCalendar file. It also
+// holds the drop-off time of each pledge that has one. It gives a volunteer a
+// reminder without storing an e-mail address.
 //
 // The file holds only what the volunteer already sees on their page, and not
 // their personal link: people can share a calendar file, and the link lets
@@ -32,7 +33,7 @@ func (s *Server) meCalendar(w http.ResponseWriter, r *http.Request, ev *model.Ev
 		s.serverError(w, r, err)
 		return
 	}
-	if len(p.MySlots) == 0 {
+	if len(p.MySlots) == 0 && !hasPledgeEntries(ev, p) {
 		s.renderError(w, r, http.StatusNotFound, "Vous n'avez aucun créneau à ajouter à l'agenda.")
 		return
 	}
@@ -52,6 +53,7 @@ func (s *Server) meCalendar(w http.ResponseWriter, r *http.Request, ev *model.Ev
 			Alarms:      reminders,
 		})
 	}
+	events = append(events, pledgeEntries(ev, p, vol.ID, eventLink)...)
 	w.Header().Set("Content-Type", "text/calendar; charset=utf-8")
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="mes-creneaux-%s.ics"`, store.Slugify(ev.Title)))
 	w.Write(ical.Build("-//jeviensaider//jeviensaider//FR", s.now(), events))

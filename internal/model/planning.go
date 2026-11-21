@@ -80,6 +80,12 @@ type Planning struct {
 	MySlots  []*SlotView // their slots, chronologically
 	HasClash bool        // two of their slots overlap
 
+	// Pledges are the pledge lists, in display order. They are empty until
+	// AddPledges is called. MyPledges holds the lists where the current
+	// volunteer has a pledge, in the same order.
+	Pledges   []*PledgeListView
+	MyPledges []*PledgeListView
+
 	columnIndex map[span]int // position of each column in Columns
 }
 
@@ -331,4 +337,45 @@ func (p *Planning) MyDuration() time.Duration {
 		d += v.EndsAt.Sub(v.StartsAt)
 	}
 	return d
+}
+
+// AddPledges builds the views of the pledge lists and adds them to the
+// planning. lists must be in display order. rows must be oldest first. A row
+// whose list is not in lists is ignored.
+func (p *Planning) AddPledges(lists []PledgeList, rows []PledgeRow) {
+	byList := make(map[int64][]PledgeRow)
+	for _, r := range rows {
+		byList[r.ListID] = append(byList[r.ListID], r)
+	}
+	for _, l := range lists {
+		v := p.newPledgeListView(l, byList[l.ID])
+		p.Pledges = append(p.Pledges, v)
+		if v.Mine {
+			p.MyPledges = append(p.MyPledges, v)
+		}
+	}
+}
+
+// PledgeListByID returns the pledge list view with the given id, or nil.
+func (p *Planning) PledgeListByID(id int64) *PledgeListView {
+	for _, v := range p.Pledges {
+		if v.ID == id {
+			return v
+		}
+	}
+	return nil
+}
+
+// PledgeTotals sums the quantities and the minimums of all the lists. allMin
+// is true when there is at least one list and every list has a minimum.
+func (p *Planning) PledgeTotals() (total, minSum int, allMin bool) {
+	allMin = len(p.Pledges) > 0
+	for _, v := range p.Pledges {
+		total += v.Total
+		minSum += v.MinItems
+		if v.MinItems == 0 {
+			allMin = false
+		}
+	}
+	return total, minSum, allMin
 }

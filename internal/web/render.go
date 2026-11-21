@@ -179,6 +179,7 @@ func mailFuncs() template.FuncMap {
 		"date":   dateFR,
 		"span":   timeRange,
 		"plural": plural,
+		"count":  unitCount,
 	}
 }
 

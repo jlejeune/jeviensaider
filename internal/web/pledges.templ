@@ -1,0 +1,144 @@
+package web
+
+import "jeviensaider/internal/model"
+
+// pledgeSection is the "À apporter" part of the event page: one card per
+// pledge list. With ?todo=1, it shows only the lists that still want items.
+templ pledgeSection(d eventPage) {
+	if len(d.P.Pledges) > 0 {
+		<section class="pledges" aria-labelledby="pledges-title">
+			<div class="section-head">
+				<h2 id="pledges-title">À apporter</h2>
+				// An event with lists only has no slot section, so the switch
+				// moves here.
+				if len(d.P.Columns) == 0 {
+					@todoSwitch(d)
+				}
+			</div>
+			for _, l := range d.P.Pledges {
+				if !d.TodoOnly || pledgeWanted(l) {
+					@pledgeCard(d, l)
+				}
+			}
+		</section>
+	}
+}
+
+templ pledgeCard(d eventPage, l *model.PledgeListView) {
+	<article class="card" id={ "pledge-" + i64(l.ID) }>
+		<h3>{ l.Name }</h3>
+		if l.Description != "" {
+			<p class="desc">{ l.Description }</p>
+		}
+		<p>
+			if label := dropOffLabel(l.DropOff); label != "" {
+				<strong>{ label }</strong> ·
+			}
+			<span class={ templ.KV("need-text", l.Missing > 0) }>{ pledgeStatus(l) }</span>
+		</p>
+		if len(l.Pledges) > 0 {
+			<p class="muted">{ pledgeNames(l.Pledges) }</p>
+		}
+		if l.Mine {
+			<p><strong>Vous en apportez { itoa(l.MyQuantity) }</strong></p>
+		}
+		if d.Event.IsOpen() {
+			if l.Mine {
+				<a class="btn" href={ pledgeURL(d.EventURL, l) } hx-get={ string(pledgeURL(d.EventURL, l)) } hx-target="#modal">Changer</a>
+			} else if l.CanSignUp {
+				<a class="btn primary" href={ pledgeURL(d.EventURL, l) } hx-get={ string(pledgeURL(d.EventURL, l)) } hx-target="#modal">Je m'en charge</a>
+			} else {
+				<p class="muted">Complet</p>
+			}
+		}
+	</article>
+}
+
+// myPledges is the "Ce que j'apporte" part of the personal page: one card per
+// pledge of the volunteer. It reads d.P.MyPledges, because d.MyP has no
+// pledges.
+templ myPledges(d eventPage) {
+	if len(d.P.MyPledges) > 0 {
+		<section id="my-pledges" aria-labelledby="my-pledges-title">
+			<h2 id="my-pledges-title">Ce que j'apporte</h2>
+			for _, l := range d.P.MyPledges {
+				<article class="card my-slot my-pledge">
+					<h3>{ l.Name }</h3>
+					<p><strong>Vous en apportez { itoa(l.MyQuantity) }</strong></p>
+					if label := dropOffLabel(l.DropOff); label != "" {
+						<p class="when">{ label }</p>
+					}
+					if d.Event.IsOpen() {
+						<p><a class="btn" href={ pledgeURL(d.EventURL, l) } hx-get={ string(pledgeURL(d.EventURL, l)) } hx-target="#modal">Changer</a></p>
+						<form method="post" action={ templ.SafeURL(d.MeURL + "/pledges/" + i64(l.MyPledgeID) + "/delete") } data-confirm={ "Annuler votre inscription : " + l.Name + " ?" } class="cancel-form">
+							<button class="btn" type="submit">Je ne peux plus en apporter</button>
+						</form>
+					}
+				</article>
+			}
+		</section>
+	}
+}
+
+templ pledgeSignupView(d pledgePage) {
+	@layout(d.Common, pageOpts{}) {
+		@backLink(d.EventURL, d.Event.Title)
+		<div class="card narrow">
+			@pledgeSignupForm(d, true)
+		</div>
+	}
+}
+
+templ pledgeSignupDialog(d pledgePage) {
+	<dialog class="modal" aria-labelledby="pledge-title">
+		<button type="button" class="close" data-close aria-label="Fermer">×</button>
+		@pledgeSignupForm(d, false)
+	</dialog>
+}
+
+templ pledgeSignupForm(d pledgePage, page bool) {
+	<div class="signup-head">
+		if page {
+			<h1 id="pledge-title">{ d.List.Name }</h1>
+		} else {
+			<h2 id="pledge-title">{ d.List.Name }</h2>
+		}
+		if d.List.Description != "" {
+			<p class="desc signup-desc">{ d.List.Description }</p>
+		}
+		if label := dropOffLabel(d.List.DropOff); label != "" {
+			<p class="when">{ label }</p>
+		}
+		<p class={ templ.KV("need-text", d.List.Missing > 0), templ.KV("muted", d.List.Missing == 0) }>{ pledgeStatus(d.List) }</p>
+		if len(d.List.Pledges) > 0 {
+			<p class="muted">Avec { pledgeNames(d.List.Pledges) }</p>
+		}
+	</div>
+	if d.Error != "" {
+		<div class="callout error" role="alert">{ d.Error }</div>
+	}
+	if !d.Event.IsOpen() {
+		<div class="callout info">Les inscriptions ne sont pas ouvertes.</div>
+	} else if !d.List.CanSignUp {
+		<div class="callout info">Complet. Merci !</div>
+	} else {
+		if d.List.Mine {
+			<p><strong>Vous en apportez { itoa(d.List.MyQuantity) }</strong></p>
+		}
+		<form method="post" action={ pledgeURL(d.EventURL, d.List) } class="stack">
+			<div class="field">
+				<label for="pledge-quantity">Combien en apportez-vous ?</label>
+				<input id="pledge-quantity" type="number" name="quantity" value={ itoa(max(d.Form.Quantity, 1)) } min="1" max={ itoa(d.List.MaxQuantity) } required inputmode="numeric"/>
+			</div>
+			@volunteerFields("pledge", d.Form.Name, d.Form.Phone)
+			<button type="submit" class="btn primary block big">
+				if d.List.Mine {
+					Enregistrer
+				} else {
+					Je m'en charge
+				}
+			</button>
+			<p class="hint center">Pas d'e-mail, pas de compte. Vous pourrez annuler à tout moment.</p>
+		</form>
+	}
+}
